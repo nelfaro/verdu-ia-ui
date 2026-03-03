@@ -110,10 +110,12 @@ elif menu == "📤 Carga de Stock":
     if archivo:
         if st.button("Enviar a Procesar"):
             # REEMPLAZA CON TU WEBHOOK URL DE n8n
-            url_webhook = "https://agentes-n8n.xjkmv6.easypanel.host/webhook/tu-url-de-carga"
+            url_webhook = "https://agentes-n8n.xjkmv6.easypanel.host/webhook/subir-stock-manual"
+            # n8n espera el archivo en una propiedad binaria llamada 'file'
             files = {'file': (archivo.name, archivo.getvalue(), 'text/csv')}
             res = requests.post(url_webhook, files=files)
             if res.status_code == 200:
-                st.success("✅ Archivo enviado con éxito.")
+                st.success("✅ Archivo subido con éxito. El stock se actualizará en breve.")
             else:
                 st.error("❌ Error en el servidor de carga.")
+
