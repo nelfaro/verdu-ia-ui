@@ -5,8 +5,7 @@ import plotly.express as px
 import os
 import requests
 
-# --- CONFIGURACIÓN ---
-st.set_page_config(page_title="Verdu IA - Control", layout="wide", page_icon="🍎")
+st.set_page_config(page_title="Verdu IA BI", layout="wide", page_icon="📈")
 
 def get_connection():
     return psycopg2.connect(
@@ -17,116 +16,104 @@ def get_connection():
         port=os.getenv("DB_PORT", "5432")
     )
 
-st.title("🍏 Panel de Control Verdu IA")
+st.title("🍏 Panel Inteligente - Verdu IA")
 
-# --- MENÚ LATERAL ---
-menu = st.sidebar.selectbox("Navegación", ["📈 Dashboard BI", "👥 Gestión de Vendedores", "💬 CRM Chatwoot", "📤 Carga de Stock", "📲 WhatsApp QR"])
+menu = st.sidebar.selectbox("Navegación", ["📈 Dashboard Hoy", "📊 Analíticas Semanales", "👥 Vendedores", "💬 CRM Chatwoot", "📤 Carga de Stock"])
 
-# --- 1. DASHBOARD BI ---
-if menu == "📈 Dashboard BI":
-    st.header("📊 Analíticas del Día")
+# --- 1. DASHBOARD HOY ---
+if menu == "📈 Dashboard Hoy":
+    st.header("📊 Resultados del Día")
     conn = get_connection()
     
-    # Verificar si hay datos hoy
-    check_data = pd.read_sql("SELECT COUNT(*) FROM foto_stock_diario", conn).iloc[0,0]
-    
-    if check_data == 0:
-        st.warning("⚠️ Todavía no se ha cargado el stock de hoy. Ve a 'Carga de Stock' para iniciar.")
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        res = pd.read_sql("SELECT SUM(beneficio) as b FROM pedidos WHERE fecha::date = (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date", conn)
-        val = res['b'].iloc[0] or 0
-        st.metric("Beneficio Neto Hoy", f"${val:,.0f}")
-    with col2:
-        res = pd.read_sql("SELECT COUNT(*) as c FROM pedidos WHERE fecha::date = (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date", conn)
-        st.metric("Pedidos Totales", res['c'].iloc[0])
-    with col3:
-        res = pd.read_sql("SELECT COUNT(*) as c FROM log_conversaciones WHERE fecha::date = (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date", conn)
-        st.metric("Chats Atendidos", res['c'].iloc[0])
+    # Gráfico de Torta: Vendedores vs IA (Ventas Totales)
+    st.subheader("🎯 Distribución de Ventas (Sellers vs Directo)")
+    query_torta = """
+        SELECT 
+            CASE WHEN v.nombre IS NULL THEN 'Agente (Venta Directa)' ELSE v.nombre END as origen,
+            SUM(p.total_venta) as total
+        FROM pedidos p
+        LEFT JOIN vendedores v ON p.cliente_whatsapp = v.whatsapp
+        WHERE p.fecha = (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+        GROUP BY origen
+    """
+    df_t = pd.read_sql(query_torta, conn)
+    if not df_t.empty:
+        fig_t = px.pie(df_t, values='total', names='origen', hole=.4, title="Participación en Ventas")
+        st.plotly_chart(fig_t, use_container_width=True)
+    else:
+        st.info("No hay ventas registradas aún.")
+    conn.close()
 
-    st.divider()
-
+# --- 2. ANALÍTICAS SEMANALES (BI) ---
+elif menu == "📊 Analíticas Semanales":
+    st.header("📅 Rendimiento de los últimos 7 días")
+    conn = get_connection()
+    
+    query_semanal = """
+        SELECT fecha, SUM(beneficio) as beneficio, COUNT(id) as pedidos
+        FROM pedidos 
+        WHERE fecha > CURRENT_DATE - INTERVAL '7 days'
+        GROUP BY fecha ORDER BY fecha ASC
+    """
+    df_s = pd.read_sql(query_semanal, conn)
+    
     c1, c2 = st.columns(2)
     with c1:
-        st.subheader("💰 Ganancia por Vendedor")
-        query = """
-            SELECT v.nombre, SUM(p.beneficio) as ganancia
-            FROM pedidos p
-            JOIN vendedores v ON p.cliente_whatsapp = v.whatsapp
-            WHERE p.fecha::date = (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
-            GROUP BY v.nombre
-        """
-        df_v = pd.read_sql(query, conn)
-        if not df_v.empty:
-            fig = px.pie(df_v, values='ganancia', names='nombre', hole=.4)
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("Esperando ventas de vendedores...")
-
+        st.write("💰 **Beneficio Diario**")
+        st.bar_chart(df_s, x="fecha", y="beneficio")
     with c2:
-        st.subheader("⚠️ Stock Crítico (Próximos a agotar)")
-        # Ajustamos la query para que no traiga negativos y solo valores reales bajos
-        query_stock = "SELECT nombre, stock FROM productos WHERE stock > 0 AND stock < 15 ORDER BY stock ASC LIMIT 8"
-        df_s = pd.read_sql(query_stock, conn)
-        if not df_s.empty:
-            st.dataframe(df_s, use_container_width=True)
-        else:
-            st.success("El stock está en niveles óptimos.")
+        st.write("📦 **Pedidos Totales**")
+        st.bar_chart(df_s, x="fecha", y="pedidos")
+    
+    st.write("💬 **Actividad de Chats (Log)**")
+    df_logs = pd.read_sql("SELECT fecha::date as f, COUNT(*) as c FROM log_conversaciones GROUP BY f ORDER BY f DESC LIMIT 7", conn)
+    st.line_chart(df_logs, x="f", y="c")
     conn.close()
 
-# --- 2. GESTIÓN DE VENDEDORES (MEJORADA) ---
-elif menu == "👥 Gestión de Vendedores":
-    st.header("👥 Administración de Personal")
+# --- 3. GESTIÓN DE VENDEDORES (MEJORADA) ---
+elif menu == "👥 Vendedores":
+    st.header("👥 Gestión de Personal")
     conn = get_connection()
     cur = conn.cursor()
+    
+    st.subheader("Personas que escribieron recientemente (Sugeridos)")
+    recientes = pd.read_sql("SELECT DISTINCT nombre, whatsapp FROM clientes ORDER BY whatsapp DESC LIMIT 5", conn)
+    for i, r in recientes.iterrows():
+        if st.button(f"Asignar como Vendedor: {r['nombre']}"):
+            cur.execute("INSERT INTO vendedores (whatsapp, nombre) VALUES (%s, %s) ON CONFLICT DO NOTHING", (r['whatsapp'], r['nombre']))
+            conn.commit()
+            st.rerun()
 
-    col_izq, col_der = st.columns(2)
-
-    with col_izq:
-        st.subheader("➕ Registrar Nuevo")
-        # Ayudamos al dueño mostrando los últimos que escribieron
-        st.write("Selecciona un contacto reciente para hacerlo vendedor:")
-        recientes = pd.read_sql("SELECT nombre, whatsapp FROM clientes ORDER BY fecha_registro DESC LIMIT 5", conn)
-        for i, r in recientes.iterrows():
-            if st.button(f"Asignar a: {r['nombre']} ({r['whatsapp']})"):
-                cur.execute("INSERT INTO vendedores (whatsapp, nombre) VALUES (%s, %s) ON CONFLICT DO NOTHING", (r['whatsapp'], r['nombre']))
-                conn.commit()
-                st.success(f"{r['nombre']} ahora es vendedor.")
-                st.rerun()
-
-    with col_der:
-        st.subheader("📋 Vendedores Activos")
-        vendedores = pd.read_sql("SELECT * FROM vendedores", conn)
-        for i, v in vendedores.iterrows():
-            c1, c2 = st.columns([3,1])
-            c1.write(f"**{v['nombre']}**")
-            if c2.button("Eliminar", key=v['whatsapp']):
-                cur.execute("DELETE FROM vendedores WHERE whatsapp = %s", (v['whatsapp'],))
-                conn.commit()
-                st.rerun()
+    st.divider()
+    st.subheader("Vendedores Actuales")
+    vend = pd.read_sql("SELECT * FROM vendedores", conn)
+    st.dataframe(vend, use_container_width=True)
     conn.close()
 
-# --- 3. CRM CHATWOOT ---
+# --- 4. CRM CHATWOOT (EMBEBIDO) ---
 elif menu == "💬 CRM Chatwoot":
-    st.header("💬 Gestión de Clientes (Chatwoot)")
-    st.info("Usa Chatwoot para ver las conversaciones detalladas y supervisar al Agente.")
-    st.link_button("Ir al CRM Chatwoot", "https://agentes-chatwoot.xjkmv6.easypanel.host/")
-    # Intentamos embeberlo
-    st.components.v1.iframe("https://agentes-chatwoot.xjkmv6.easypanel.host/", height=700, scrolling=True)
+    st.header("💬 CRM Chatwoot")
+    # Intentamos embeberlo. Nota: Si Chatwoot bloquea iframes, aparecerá el botón.
+    st.link_button("Abrir Chatwoot en pestaña nueva", "https://agentes-chatwoot.xjkmv6.easypanel.host/")
+    st.components.v1.iframe("https://agentes-chatwoot.xjkmv6.easypanel.host/", height=800, scrolling=True)
 
-# --- 4. CARGA DE STOCK ---
+# --- 5. CARGA DE STOCK ---
 elif menu == "📤 Carga de Stock":
-    st.header("📤 Actualizar Inventario")
+    st.header("📤 Carga de Archivo")
+    conn = get_connection()
+    ultimo = pd.read_sql("SELECT nombre_archivo, fecha_proceso FROM control_cargas ORDER BY fecha_proceso DESC LIMIT 1", conn)
+    if not ultimo.empty:
+        st.info(f"Último archivo cargado: **{ultimo.iloc[0,0]}** ({ultimo.iloc[0,1]})")
+    conn.close()
+
     archivo = st.file_uploader("Sube el CSV del día", type=["csv"])
     if archivo:
-        if st.button("Procesar Archivo"):
-            # Enviar al webhook de n8n
-            url_n8n = "TU_WEBHOOK_N8N_ACA" 
-            requests.post(url_n8n, files={"file": archivo.getvalue()})
-            st.success("Stock enviado correctamente.")
-
-# --- 5. WHATSAPP QR ---
-elif menu == "📲 WhatsApp QR":
-    st.header("📲 Estado del Puente")
-    st.components.v1.iframe("https://agentes-puentewhatsapp.xjkmv6.easypanel.host/", height=600)
+        if st.button("Enviar a Procesar"):
+            # REEMPLAZA CON TU WEBHOOK URL DE n8n
+            url_webhook = "https://agentes-n8n.xjkmv6.easypanel.host/webhook/tu-url-de-carga"
+            files = {'file': (archivo.name, archivo.getvalue(), 'text/csv')}
+            res = requests.post(url_webhook, files=files)
+            if res.status_code == 200:
+                st.success("✅ Archivo enviado con éxito.")
+            else:
+                st.error("❌ Error en el servidor de carga.")
