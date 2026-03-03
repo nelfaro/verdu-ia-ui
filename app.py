@@ -11,10 +11,10 @@ st.set_page_config(page_title="Verdu IA - Panel de Control", layout="wide")
 # Conexión a la Base de Datos (Se usarán variables de entorno de Easypanel)
 def get_connection():
     return psycopg2.connect(
-        host=os.getenv("DB_HOST", "db"),
-        database=os.getenv("DB_NAME", "mayorista_db"),
+        host=os.getenv("DB_HOST", "agentes_db_postgres"),
+        database=os.getenv("DB_NAME", "postgres),
         user=os.getenv("DB_USER", "postgres"),
-        password=os.getenv("DB_PASS", "tu_clave"),
+        password=os.getenv("DB_PASS", "Q!6x$8wLtwqbWv2"),
         port=os.getenv("DB_PORT", "5432")
     )
 
@@ -105,4 +105,5 @@ elif menu == "Conexión WhatsApp":
     st.header("🔗 Puente WhatsApp")
     st.write("Si el agente se desconecta, escanea el código QR aquí abajo.")
     # Reemplaza con la URL de tu puente (Evolution API, o el que uses)
+
     st.components.v1.iframe("https://agentes-puentewhatsapp.xjkmv6.easypanel.host/", height=600, scrolling=True)
