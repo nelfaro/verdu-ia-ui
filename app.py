@@ -3,29 +3,30 @@ import pandas as pd
 import psycopg2
 import os
 
-# Configuración inicial
-st.set_page_config(page_title="Verdu IA", layout="wide")
+st.set_page_config(page_title="Verdu IA - Panel", layout="wide")
 
-# Función de conexión con manejo de errores real
+# Función de conexión ultra-segura
 def get_connection():
     try:
-        conn = psycopg2.connect(
-            host=os.getenv("DB_HOST", "db_postgres"),
+        return psycopg2.connect(
+            host=os.getenv("DB_HOST", "agentes_db_postgres"),
             database=os.getenv("DB_NAME", "db_agente"),
             user=os.getenv("DB_USER", "postgres"),
-            password=os.getenv("DB_PASS", "Q!6x$8wLtwqbWv2"),
+            password=os.getenv("DB_PASS"),
             port=os.getenv("DB_PORT", "5432"),
             connect_timeout=3
         )
-        return conn
     except Exception as e:
-        # Esto imprimirá el error en la web en lugar de cerrar la app
-        st.error(f"❌ Error de conexión a la Base de Datos: {e}")
-        st.info("Revisa que DB_HOST coincida con el nombre del servicio en Easypanel")
         return None
+
+st.title("🍎 Panel de Control - Verdu IA")
 
 conn = get_connection()
 
 if conn is None:
-    st.warning("La aplicación está corriendo en modo desconectado. Verifica las credenciales.")
-    st.stop() # Detiene la ejecución del resto del script pero MANTIENE la web abierta
+    st.error("❌ No se pudo conectar a la base de datos.")
+    st.info("Verifica las variables de entorno en Easypanel y que el nombre del host sea correcto.")
+    st.stop() # Esto detiene el script pero NO cierra el contenedor
+
+# El resto de tu lógica de Dashboard y Vendedores...
+st.success("✅ Conectado a la base de datos db_agente")
