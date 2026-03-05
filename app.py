@@ -120,25 +120,29 @@ elif menu == "📤 Carga de Stock":
     archivo = st.file_uploader("Sube el CSV del día", type=["csv"])
     if archivo:
         if st.button("Procesar y Actualizar Stock"):
-            # REEMPLAZA CON LA URL DE PRODUCCIÓN DE TU WEBHOOK (Sin el /test)
             url_n8n = "https://agentes-n8n.xjkmv6.easypanel.host/webhook/subir-stock-manual"
             files = {'file': (archivo.name, archivo.getvalue(), 'text/csv')}
             
-            with st.spinner("Procesando archivo en el servidor..."):
+            with st.spinner("Analizando archivo en el servidor..."):
                 try:
-                    # Añadimos timeout de 15 segundos para que no se rinda muy rápido
-                    res = requests.post(url_n8n, files=files, timeout=15)
+                    res = requests.post(url_n8n, files=files, timeout=20)
                     
+                    # Intentamos leer la respuesta JSON de n8n
+                    try:
+                        respuesta_json = res.json()
+                        mensaje_servidor = respuesta_json.get("mensaje", res.text)
+                    except:
+                        mensaje_servidor = res.text
+
                     if res.status_code == 200:
-                        st.success("✅ ¡Éxito! El archivo fue recibido y procesado por n8n.")
-                        # Comentamos st.rerun() temporalmente para que puedas leer el mensaje verde
-                        # st.rerun() 
+                        st.success(f"✅ {mensaje_servidor}")
+                    elif res.status_code == 400:
+                        # Aquí capturamos el mensaje de "Archivo duplicado"
+                        st.warning(f"⚠️ Atención: {mensaje_servidor}")
                     else:
-                        # Si n8n responde pero con un error (ej. archivo duplicado)
-                        st.error(f"⚠️ El servidor rechazó el archivo. Código: {res.status_code}. Detalles: {res.text}")
-                
+                        st.error(f"❌ Error del servidor: {mensaje_servidor}")
+                        
                 except requests.exceptions.Timeout:
-                    st.error("⏳ El servidor tardó demasiado en responder, pero es posible que el archivo se esté procesando en segundo plano. Verifica la fecha del último archivo cargado en unos minutos.")
+                    st.error("⏳ El servidor está procesando el archivo en segundo plano. Revisa en unos minutos.")
                 except Exception as e:
-                    # Este error es si la URL está caída o mal escrita
-                    st.error(f"❌ Error crítico de conexión: {e}")
+                    st.error(f"❌ Fallo de conexión: {e}")
