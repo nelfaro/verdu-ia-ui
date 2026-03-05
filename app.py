@@ -120,14 +120,25 @@ elif menu == "📤 Carga de Stock":
     archivo = st.file_uploader("Sube el CSV del día", type=["csv"])
     if archivo:
         if st.button("Procesar y Actualizar Stock"):
+            # REEMPLAZA CON LA URL DE PRODUCCIÓN DE TU WEBHOOK (Sin el /test)
             url_n8n = "https://agentes-n8n.xjkmv6.easypanel.host/webhook/subir-stock-manual"
             files = {'file': (archivo.name, archivo.getvalue(), 'text/csv')}
-            try:
-                r = requests.post(url_n8n, files=files)
-                if r.status_code == 200:
-                    st.success("✅ ¡Éxito! El stock ha sido actualizado.")
-                    st.rerun()
-                else:
-                    st.error(f"Error: {r.text}")
-            except:
-                st.error("No se pudo conectar con n8n.")
+            
+            with st.spinner("Procesando archivo en el servidor..."):
+                try:
+                    # Añadimos timeout de 15 segundos para que no se rinda muy rápido
+                    res = requests.post(url_n8n, files=files, timeout=15)
+                    
+                    if res.status_code == 200:
+                        st.success("✅ ¡Éxito! El archivo fue recibido y procesado por n8n.")
+                        # Comentamos st.rerun() temporalmente para que puedas leer el mensaje verde
+                        # st.rerun() 
+                    else:
+                        # Si n8n responde pero con un error (ej. archivo duplicado)
+                        st.error(f"⚠️ El servidor rechazó el archivo. Código: {res.status_code}. Detalles: {res.text}")
+                
+                except requests.exceptions.Timeout:
+                    st.error("⏳ El servidor tardó demasiado en responder, pero es posible que el archivo se esté procesando en segundo plano. Verifica la fecha del último archivo cargado en unos minutos.")
+                except Exception as e:
+                    # Este error es si la URL está caída o mal escrita
+                    st.error(f"❌ Error crítico de conexión: {e}")
