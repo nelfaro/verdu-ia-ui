@@ -64,17 +64,61 @@ if menu == "📈 Dashboard Hoy":
 
 # --- 2. ANALÍTICAS SEMANALES (GRÁFICOS DE BARRA) ---
 elif menu == "📊 Analíticas Semanales":
-    st.header("📅 Rendimiento Semanal")
-    conn = get_connection()
+    st.header("📅 Rendimiento de los últimos 7 días")
     
-    df_semana = pd.read_sql("SELECT fecha, SUM(beneficio) as beneficio, COUNT(id) as pedidos FROM pedidos WHERE fecha > CURRENT_DATE - INTERVAL '7 days' GROUP BY fecha ORDER BY fecha ASC", conn)
-    
-    st.subheader("💰 Beneficio por Día")
-    st.bar_chart(df_semana, x="fecha", y="beneficio", color="#2e7d32")
-    
-    st.subheader("📦 Cantidad de Pedidos")
-    st.bar_chart(df_semana, x="fecha", y="pedidos", color="#81c784")
-    conn.close()
+    try:
+        conn = get_connection()
+        
+        # Query para Beneficios y Pedidos
+        query_pedidos = """
+            SELECT fecha, SUM(beneficio) as beneficio, COUNT(id) as pedidos 
+            FROM pedidos 
+            WHERE fecha >= CURRENT_DATE - INTERVAL '7 days' 
+            GROUP BY fecha 
+            ORDER BY fecha ASC
+        """
+        df_pedidos = pd.read_sql(query_pedidos, conn)
+
+        # Query para Chats Atendidos
+        query_chats = """
+            SELECT fecha::date as fecha, COUNT(*) as chats 
+            FROM log_conversaciones 
+            WHERE tipo_mensaje = 'incoming' 
+            AND fecha >= CURRENT_DATE - INTERVAL '7 days' 
+            GROUP BY fecha::date 
+            ORDER BY fecha::date ASC
+        """
+        df_chats = pd.read_sql(query_chats, conn)
+        
+        conn.close()
+
+        # Mostrar gráficos en 3 columnas para una vista ejecutiva
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            st.subheader("💰 Beneficio por Día")
+            if not df_pedidos.empty:
+                st.bar_chart(df_pedidos, x="fecha", y="beneficio", color="#2e7d32")
+            else:
+                st.info("Sin datos de beneficio.")
+
+        with col2:
+            st.subheader("📦 Pedidos Cerrados")
+            if not df_pedidos.empty:
+                st.bar_chart(df_pedidos, x="fecha", y="pedidos", color="#1976d2")
+            else:
+                st.info("Sin datos de pedidos.")
+
+        with col3:
+            st.subheader("💬 Chats Atendidos")
+            if not df_chats.empty:
+                # Usamos color naranja para diferenciar los chats
+                st.bar_chart(df_chats, x="fecha", y="chats", color="#f57c00") 
+            else:
+                st.info("Sin actividad de chats.")
+
+    except Exception as e:
+        st.error(f"Error al cargar las analíticas semanales: {e}")
 
 # --- 3. GESTIÓN DE VENDEDORES (CRUD) ---
 elif menu == "👥 Gestión de Vendedores":
@@ -159,3 +203,4 @@ elif menu == "📤 Carga de Stock":
                 # Solo entra aquí si la URL no existe o no hay internet
                 except requests.exceptions.RequestException as e:
                     st.error("❌ No se pudo conectar con n8n. Revisa que el Webhook esté activo.")
+
