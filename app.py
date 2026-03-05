@@ -108,41 +108,54 @@ elif menu == "💬 CRM Chatwoot":
     st.link_button("🚀 Abrir Chatwoot Pantalla Completa", "https://agentes-chatwoot.xjkmv6.easypanel.host/")
     st.components.v1.iframe("https://agentes-chatwoot.xjkmv6.easypanel.host/", height=700, scrolling=True)
 
+
 # --- 5. CARGA DE STOCK ---
 elif menu == "📤 Carga de Stock":
     st.header("📤 Actualizar Inventario")
-    conn = get_connection()
-    ultimo = pd.read_sql("SELECT nombre_archivo, fecha_proceso AT TIME ZONE 'UTC' AT TIME ZONE 'America/Argentina/Buenos_Aires' as fecha FROM control_cargas ORDER BY fecha_proceso DESC LIMIT 1", conn)
-    if not ultimo.empty:
-        st.success(f"✅ Último archivo cargado: **{ultimo.iloc[0,0]}** \n\n(Procesado el: {ultimo.iloc[0,1].strftime('%d/%m/%Y %H:%M')})")
-    conn.close()
+    
+    # 1. Mostrar último archivo cargado
+    try:
+        conn = get_connection()
+        ultimo = pd.read_sql("SELECT nombre_archivo, fecha_proceso AT TIME ZONE 'UTC' AT TIME ZONE 'America/Argentina/Buenos_Aires' as fecha FROM control_cargas ORDER BY fecha_proceso DESC LIMIT 1", conn)
+        if not ultimo.empty:
+            st.info(f"Último archivo procesado: **{ultimo.iloc[0,0]}** (el {ultimo.iloc[0,1].strftime('%d/%m/%Y %H:%M')})")
+        conn.close()
+    except Exception as e:
+        st.warning("No se pudo conectar a la base de datos para ver el historial.")
 
+    # 2. Formulario de carga
     archivo = st.file_uploader("Sube el CSV del día", type=["csv"])
+    
     if archivo:
         if st.button("Procesar y Actualizar Stock"):
             url_n8n = "https://agentes-n8n.xjkmv6.easypanel.host/webhook/subir-stock-manual"
             files = {'file': (archivo.name, archivo.getvalue(), 'text/csv')}
             
-            with st.spinner("Analizando archivo en el servidor..."):
+            with st.spinner("Enviando archivo a n8n..."):
                 try:
                     res = requests.post(url_n8n, files=files, timeout=20)
                     
-                    # Intentamos leer la respuesta JSON de n8n
-                    try:
-                        respuesta_json = res.json()
-                        mensaje_servidor = respuesta_json.get("mensaje", res.text)
-                    except:
-                        mensaje_servidor = res.text
-
+                    # Verificamos si n8n respondió con éxito (200)
                     if res.status_code == 200:
-                        st.success(f"✅ {mensaje_servidor}")
+                        st.success("✅ ¡Éxito! El stock ha sido actualizado.")
+                    
+                    # Verificamos si n8n lo rechazó por duplicado (400)
                     elif res.status_code == 400:
-                        # Aquí capturamos el mensaje de "Archivo duplicado"
-                        st.warning(f"⚠️ Atención: {mensaje_servidor}")
+                        # Intentamos sacar el mensaje exacto que configuraste en n8n
+                        try:
+                            msg = res.json().get("mensaje", "Archivo duplicado.")
+                        except:
+                            msg = "Archivo rechazado por reglas de negocio."
+                        st.warning(f"⚠️ {msg}")
+                    
+                    # Cualquier otro error HTTP (500, 404)
                     else:
-                        st.error(f"❌ Error del servidor: {mensaje_servidor}")
-                        
+                        st.error(f"❌ Error del servidor de n8n (Código {res.status_code})")
+
+                # Solo entra aquí si el servidor no responde en 20 segundos
                 except requests.exceptions.Timeout:
-                    st.error("⏳ El servidor está procesando el archivo en segundo plano. Revisa en unos minutos.")
-                except Exception as e:
-                    st.error(f"❌ Fallo de conexión: {e}")
+                    st.warning("⏳ El servidor tardó en responder. Verifica el log en 2 minutos.")
+                
+                # Solo entra aquí si la URL no existe o no hay internet
+                except requests.exceptions.RequestException as e:
+                    st.error("❌ No se pudo conectar con n8n. Revisa que el Webhook esté activo.")
