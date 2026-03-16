@@ -18,7 +18,7 @@ def get_connection():
 
 st.title("🍏 Panel de Control Inteligente - Verdu IA")
 
-menu = st.sidebar.selectbox("Navegación", ["📈 Dashboard Hoy", "📊 Analíticas Semanales", "👥 Gestión de Vendedores", "💬 CRM Chatwoot", "📤 Carga de Stock"])
+menu = st.sidebar.selectbox("Navegación", ["📈 Dashboard Hoy", "📊 Analíticas Semanales", "👥 Gestión de Vendedores", "💬 CRM Chatwoot", "📤 Carga de Stock", "📱 Conectar WhatsApp"])
 
 # --- 1. DASHBOARD HOY ---
 if menu == "📈 Dashboard Hoy":
@@ -27,10 +27,19 @@ if menu == "📈 Dashboard Hoy":
     
     col1, col2, col3 = st.columns(3)
     with col1:
-        res = pd.read_sql("SELECT SUM(beneficio) as b FROM pedidos WHERE fecha = CURRENT_DATE", conn)
-        st.metric("Beneficio Neto Hoy", f"${(res['b'].iloc[0] or 0):,.0f}")
+        # Beneficio calculado desde v_pedidos_dia usando el array anotados
+        res = pd.read_sql("""
+            SELECT COALESCE(SUM(total_venta), 0) as b 
+            FROM v_pedidos_dia 
+            WHERE fecha = (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+        """, conn)
+        st.metric("Venta Total Hoy", f"${(res['b'].iloc[0] or 0):,.0f}")
     with col2:
-        res = pd.read_sql("SELECT COUNT(*) as c FROM pedidos WHERE fecha = CURRENT_DATE", conn)
+        res = pd.read_sql("""
+            SELECT COUNT(*) as c 
+            FROM v_pedidos_dia 
+            WHERE fecha = (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+        """, conn)
         st.metric("Pedidos Totales", res['c'].iloc[0])
     with col3:
         res = pd.read_sql("SELECT COUNT(*) as c FROM log_conversaciones WHERE fecha::date = CURRENT_DATE", conn)
@@ -44,9 +53,9 @@ if menu == "📈 Dashboard Hoy":
             SELECT 
                 CASE WHEN v.nombre IS NULL THEN 'Agente (Venta Directa)' ELSE 'Vendedores Oficiales' END as tipo,
                 SUM(p.total_venta) as total
-            FROM pedidos p
+            FROM v_pedidos_dia p
             LEFT JOIN vendedores v ON p.cliente_whatsapp = v.whatsapp
-            WHERE p.fecha = CURRENT_DATE
+            WHERE p.fecha = (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
             GROUP BY tipo
         """
         df_t = pd.read_sql(query_torta, conn)
@@ -60,6 +69,24 @@ if menu == "📈 Dashboard Hoy":
         st.subheader("⚠️ Stock Crítico")
         df_s = pd.read_sql("SELECT nombre, stock FROM productos WHERE stock >= 0 AND stock < 15 ORDER BY stock ASC LIMIT 8", conn)
         st.dataframe(df_s, use_container_width=True)
+
+    st.divider()
+    st.subheader("📋 Pedidos del Día")
+    df_pedidos_hoy = pd.read_sql("""
+        SELECT 
+            cliente_final_nombre as Cliente,
+            total_venta as Total,
+            estado as Estado,
+            origen as Origen
+        FROM v_pedidos_dia
+        WHERE fecha = (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+        ORDER BY cliente_final_nombre
+    """, conn)
+    if not df_pedidos_hoy.empty:
+        st.dataframe(df_pedidos_hoy, use_container_width=True)
+    else:
+        st.info("Sin pedidos registrados hoy.")
+
     conn.close()
 
 # --- 2. ANALÍTICAS SEMANALES (GRÁFICOS DE BARRA) ---
@@ -69,11 +96,14 @@ elif menu == "📊 Analíticas Semanales":
     try:
         conn = get_connection()
         
-        # Query para Beneficios y Pedidos
+        # Query para Ventas y Pedidos desde v_pedidos_dia
         query_pedidos = """
-            SELECT fecha, SUM(beneficio) as beneficio, COUNT(id) as pedidos 
-            FROM pedidos 
-            WHERE fecha >= CURRENT_DATE - INTERVAL '7 days' 
+            SELECT 
+                fecha, 
+                SUM(total_venta) as total_venta, 
+                COUNT(*) as pedidos 
+            FROM v_pedidos_dia
+            WHERE fecha >= (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date - INTERVAL '7 days' 
             GROUP BY fecha 
             ORDER BY fecha ASC
         """
@@ -92,18 +122,17 @@ elif menu == "📊 Analíticas Semanales":
         
         conn.close()
 
-        # Mostrar gráficos en 3 columnas para una vista ejecutiva
         col1, col2, col3 = st.columns(3)
 
         with col1:
-            st.subheader("💰 Beneficio por Día")
+            st.subheader("💰 Venta Total por Día")
             if not df_pedidos.empty:
-                st.bar_chart(df_pedidos, x="fecha", y="beneficio", color="#2e7d32")
+                st.bar_chart(df_pedidos, x="fecha", y="total_venta", color="#2e7d32")
             else:
-                st.info("Sin datos de beneficio.")
+                st.info("Sin datos de ventas.")
 
         with col2:
-            st.subheader("📦 Pedidos Cerrados")
+            st.subheader("📦 Pedidos por Día")
             if not df_pedidos.empty:
                 st.bar_chart(df_pedidos, x="fecha", y="pedidos", color="#1976d2")
             else:
@@ -112,7 +141,6 @@ elif menu == "📊 Analíticas Semanales":
         with col3:
             st.subheader("💬 Chats Atendidos")
             if not df_chats.empty:
-                # Usamos color naranja para diferenciar los chats
                 st.bar_chart(df_chats, x="fecha", y="chats", color="#f57c00") 
             else:
                 st.info("Sin actividad de chats.")
@@ -157,7 +185,6 @@ elif menu == "💬 CRM Chatwoot":
 elif menu == "📤 Carga de Stock":
     st.header("📤 Actualizar Inventario")
     
-    # 1. Mostrar último archivo cargado
     try:
         conn = get_connection()
         ultimo = pd.read_sql("SELECT nombre_archivo, fecha_proceso AT TIME ZONE 'UTC' AT TIME ZONE 'America/Argentina/Buenos_Aires' as fecha FROM control_cargas ORDER BY fecha_proceso DESC LIMIT 1", conn)
@@ -167,7 +194,6 @@ elif menu == "📤 Carga de Stock":
     except Exception as e:
         st.warning("No se pudo conectar a la base de datos para ver el historial.")
 
-    # 2. Formulario de carga
     archivo = st.file_uploader("Sube el CSV del día", type=["csv"])
     
     if archivo:
@@ -179,28 +205,25 @@ elif menu == "📤 Carga de Stock":
                 try:
                     res = requests.post(url_n8n, files=files, timeout=20)
                     
-                    # Verificamos si n8n respondió con éxito (200)
                     if res.status_code == 200:
                         st.success("✅ ¡Éxito! El stock ha sido actualizado.")
-                    
-                    # Verificamos si n8n lo rechazó por duplicado (400)
                     elif res.status_code == 400:
-                        # Intentamos sacar el mensaje exacto que configuraste en n8n
                         try:
                             msg = res.json().get("mensaje", "Archivo duplicado.")
                         except:
                             msg = "Archivo rechazado por reglas de negocio."
                         st.warning(f"⚠️ {msg}")
-                    
-                    # Cualquier otro error HTTP (500, 404)
                     else:
                         st.error(f"❌ Error del servidor de n8n (Código {res.status_code})")
 
-                # Solo entra aquí si el servidor no responde en 20 segundos
                 except requests.exceptions.Timeout:
                     st.warning("⏳ El servidor tardó en responder. Verifica el log en 2 minutos.")
                 
-                # Solo entra aquí si la URL no existe o no hay internet
                 except requests.exceptions.RequestException as e:
                     st.error("❌ No se pudo conectar con n8n. Revisa que el Webhook esté activo.")
-
+# --- 6. CONECTAR WHATSAPP ---
+elif menu == "📱 Conectar WhatsApp":
+    st.header("📱 Conectar WhatsApp al Agente")
+    st.info("Escaneá el código QR con tu WhatsApp para vincular tu número al agente. Una vez conectado, el agente comenzará a recibir y responder mensajes automáticamente.")
+    st.components.v1.iframe("https://agentes-puentewhatsapp.xjkmv6.easypanel.host/", height=700, scrolling=True)
+    st.caption("⚠️ Si el QR no carga, verificá que el servicio de puente WhatsApp esté activo en Easypanel.")
