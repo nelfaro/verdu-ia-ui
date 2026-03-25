@@ -92,18 +92,34 @@ else:
         st.header("📊 Resultados del Día")
         conn = get_connection()
         
+        # --- CÁLCULO DE KPIS (Leyendo el nombre y cantidad del JSON) ---
+        query_kpi = """
+            SELECT 
+                SUM(COALESCE((item->>'cantidad')::numeric * (item->>'precio')::numeric, 0)) as total_venta,
+                SUM(COALESCE((item->>'cantidad')::numeric * ((item->>'precio')::numeric - f.precio_costo), 0)) as beneficio_neto,
+                COUNT(DISTINCT c.id) as cantidad_pedidos
+            FROM carga_sesiones c
+            LEFT JOIN LATERAL jsonb_array_elements(c.anotados) as item ON true
+            LEFT JOIN foto_stock_diario f ON f.nombre = item->>'nombre'
+            WHERE c.fecha = (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+            AND c.estado != 'cancelado'
+            AND jsonb_typeof(c.anotados) = 'array'
+        """
+        res_kpi = pd.read_sql(query_kpi, conn)
+        
+        venta_total = res_kpi['total_venta'].iloc[0] or 0
+        beneficio = res_kpi['beneficio_neto'].iloc[0] or 0
+        pedidos_tot = res_kpi['cantidad_pedidos'].iloc[0] or 0
+
         # KPIs
         col1, col2, col3 = st.columns(3)
         with col1:
-            res = pd.read_sql("SELECT SUM(COALESCE(beneficio, 0)) as b FROM pedidos WHERE fecha::date = (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date", conn)
-            val = res['b'].iloc[0] or 0
-            st.metric("Beneficio Neto Hoy", f"${val:,.0f}")
+            st.metric("Venta Total Hoy", f"${venta_total:,.0f}")
         with col2:
-            res = pd.read_sql("SELECT COUNT(*) as c FROM pedidos WHERE fecha::date = (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date", conn)
-            st.metric("Pedidos Totales", res['c'].iloc[0])
+            st.metric("Beneficio Neto Hoy", f"${beneficio:,.0f}")
         with col3:
-            res = pd.read_sql("SELECT COUNT(*) as c FROM log_conversaciones WHERE tipo_mensaje = 'incoming' AND fecha::date = (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date", conn)
-            st.metric("Chats Atendidos", res['c'].iloc[0])
+            res_chats = pd.read_sql("SELECT COUNT(*) as c FROM log_conversaciones WHERE tipo_mensaje = 'incoming' AND fecha::date = (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date", conn)
+            st.metric("Chats Atendidos", res_chats['c'].iloc[0])
 
         st.divider()
 
@@ -114,10 +130,13 @@ else:
             query_torta = """
                 SELECT 
                     CASE WHEN v.nombre IS NULL THEN 'Agente (Venta Directa)' ELSE 'Vendedores Oficiales' END as tipo,
-                    SUM(COALESCE(p.total_venta, 0)) as total
-                FROM pedidos p
-                LEFT JOIN vendedores v ON p.cliente_whatsapp = v.whatsapp
-                WHERE p.fecha::date = (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+                    SUM(COALESCE((item->>'cantidad')::numeric * (item->>'precio')::numeric, 0)) as total
+                FROM carga_sesiones c
+                LEFT JOIN LATERAL jsonb_array_elements(c.anotados) as item ON true
+                LEFT JOIN vendedores v ON c.whatsapp_id = v.whatsapp
+                WHERE c.fecha = (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+                AND c.estado != 'cancelado'
+                AND jsonb_typeof(c.anotados) = 'array'
                 GROUP BY tipo
             """
             df_t = pd.read_sql(query_torta, conn)
@@ -131,17 +150,20 @@ else:
             st.subheader("📦 Pedidos del Día (En Vivo)")
             query_pedidos = """
                 SELECT 
-                    cliente_final_nombre AS "Cliente",
-                    COALESCE(total_venta, 0) AS "Monto ($)",
-                    estado AS "Estado"
-                FROM pedidos
-                WHERE fecha::date = (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
-                ORDER BY id DESC
+                    c.cliente_final_nombre AS "Cliente",
+                    COALESCE(SUM((item->>'cantidad')::numeric * (item->>'precio')::numeric), 0) AS "Monto Estimado ($)",
+                    c.estado AS "Estado"
+                FROM carga_sesiones c
+                LEFT JOIN LATERAL jsonb_array_elements(c.anotados) as item ON true
+                WHERE c.fecha = (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+                AND jsonb_typeof(c.anotados) = 'array'
+                GROUP BY c.id, c.cliente_final_nombre, c.estado
+                ORDER BY c.id DESC
             """
             df_pedidos = pd.read_sql(query_pedidos, conn)
             
             if not df_pedidos.empty:
-                df_pedidos["Monto ($)"] = df_pedidos["Monto ($)"].apply(lambda x: f"${x:,.0f}")
+                df_pedidos["Monto Estimado ($)"] = df_pedidos["Monto Estimado ($)"].apply(lambda x: f"${x:,.0f}")
                 st.dataframe(df_pedidos, use_container_width=True, hide_index=True)
             else:
                 st.success("Aún no hay pedidos registrados el día de hoy.")
@@ -155,14 +177,21 @@ else:
         st.header("📅 Rendimiento de los últimos 7 días")
         conn = get_connection()
         
-        query_pedidos = """
-            SELECT fecha, SUM(COALESCE(beneficio, 0)) as beneficio, COUNT(id) as pedidos 
-            FROM pedidos 
-            WHERE fecha >= CURRENT_DATE - INTERVAL '7 days' 
-            GROUP BY fecha 
-            ORDER BY fecha ASC
+        query_hist = """
+            SELECT 
+                c.fecha, 
+                SUM(COALESCE((item->>'cantidad')::numeric * ((item->>'precio')::numeric - f.precio_costo), 0)) as beneficio,
+                COUNT(DISTINCT c.id) as pedidos 
+            FROM carga_sesiones c
+            LEFT JOIN LATERAL jsonb_array_elements(c.anotados) as item ON true
+            LEFT JOIN foto_stock_diario f ON f.nombre = item->>'nombre'
+            WHERE c.fecha >= CURRENT_DATE - INTERVAL '7 days'
+            AND c.estado != 'cancelado'
+            AND jsonb_typeof(c.anotados) = 'array'
+            GROUP BY c.fecha 
+            ORDER BY c.fecha ASC
         """
-        df_pedidos = pd.read_sql(query_pedidos, conn)
+        df_hist = pd.read_sql(query_hist, conn)
 
         query_chats = """
             SELECT fecha::date as fecha, COUNT(*) as chats 
@@ -179,15 +208,15 @@ else:
 
         with col1:
             st.subheader("💰 Beneficio por Día")
-            if not df_pedidos.empty:
-                st.bar_chart(df_pedidos, x="fecha", y="beneficio", color="#2e7d32")
+            if not df_hist.empty:
+                st.bar_chart(df_hist, x="fecha", y="beneficio", color="#2e7d32")
             else:
                 st.info("Sin datos.")
 
         with col2:
             st.subheader("📦 Pedidos Cerrados")
-            if not df_pedidos.empty:
-                st.bar_chart(df_pedidos, x="fecha", y="pedidos", color="#1976d2")
+            if not df_hist.empty:
+                st.bar_chart(df_hist, x="fecha", y="pedidos", color="#1976d2")
             else:
                 st.info("Sin datos.")
 
