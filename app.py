@@ -266,7 +266,7 @@ else:
     elif menu == "💬 CRM Chatwoot":
         st.header("💬 Gestión de Clientes (Chatwoot)")
         st.link_button("🚀 Abrir Chatwoot en pestaña completa", "https://agentes-chatwoot.xjkmv6.easypanel.host/")
-        st.components.v1.iframe("https://agentes-chatwoot.xjkmv6.easypanel.host/", height=700, scrolling=True)
+        #st.components.v1.iframe("https://agentes-chatwoot.xjkmv6.easypanel.host/", height=700, scrolling=True)
 
     # ==========================================
     # PESTAÑA 5: CONECTAR WHATSAPP
