@@ -77,7 +77,7 @@ else:
         st.image("https://cdn-icons-png.flaticon.com/512/2329/2329865.png", width=80)
         st.markdown(f"**Usuario:** {st.session_state['usuario_actual']}")
         st.divider()
-        menu = st.radio("Navegación", ["📈 Dashboard Hoy", "📊 Analíticas Semanales", "👥 Gestión de Vendedores", "💬 CRM Chatwoot", "📤 Carga de Stock"])
+        menu = st.radio("Navegación", ["📈 Dashboard Hoy", "📊 Analíticas Semanales", "👥 Gestión de Vendedores", "💬 CRM Chatwoot", "📱 Conectar WhatsApp", "📤 Carga de Stock"])
         st.divider()
         if st.button("🚪 Cerrar Sesión", use_container_width=True):
             st.session_state['autenticado'] = False
@@ -269,7 +269,17 @@ else:
         st.components.v1.iframe("https://agentes-chatwoot.xjkmv6.easypanel.host/", height=700, scrolling=True)
 
     # ==========================================
-    # PESTAÑA 5: CARGA DE STOCK
+    # PESTAÑA 5: CONECTAR WHATSAPP
+    # ==========================================
+    elif menu == "📱 Conectar WhatsApp":
+        st.header("📱 Conectar WhatsApp al Agente")
+        st.info("Escaneá el código QR con tu WhatsApp para vincular tu número al agente. Una vez conectado, el agente comenzará a recibir y responder mensajes automáticamente.")
+        st.components.v1.iframe("https://agentes-puentewhatsapp.xjkmv6.easypanel.host/", height=700, scrolling=True)
+        st.caption("⚠️ Si el QR no carga, verificá que el servicio de puente WhatsApp esté activo en Easypanel.")
+
+    
+    # ==========================================
+    # PESTAÑA 6: CARGA DE STOCK
     # ==========================================
     elif menu == "📤 Carga de Stock":
         st.header("📤 Actualizar Inventario")
