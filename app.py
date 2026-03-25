@@ -4,8 +4,18 @@ import psycopg2
 import plotly.express as px
 import os
 import requests
+import hashlib
 
-st.set_page_config(page_title="Verdu IA - Sistema Mayorista", layout="wide", page_icon="🍎")
+# --- CONFIGURACIÓN DE PÁGINA ---
+st.set_page_config(page_title="Ciuccoli Hnos - Sistema Mayorista", layout="wide", page_icon="🍎")
+
+# Ocultar menú de Streamlit por defecto
+st.markdown("""
+    <style>
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    </style>
+""", unsafe_allow_html=True)
 
 def get_connection():
     return psycopg2.connect(
@@ -16,214 +26,66 @@ def get_connection():
         port=os.getenv("DB_PORT", "5432")
     )
 
-st.title("🍏 Panel de Control Inteligente - Verdu IA")
+# --- SISTEMA DE LOGIN ---
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
 
-menu = st.sidebar.selectbox("Navegación", ["📈 Dashboard Hoy", "📊 Analíticas Semanales", "👥 Gestión de Vendedores", "💬 CRM Chatwoot", "📤 Carga de Stock", "📱 Conectar WhatsApp"])
-
-# --- 1. DASHBOARD HOY ---
-if menu == "📈 Dashboard Hoy":
-    st.header("📊 Resultados del Día")
-    conn = get_connection()
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        # Beneficio calculado desde v_pedidos_dia usando el array anotados
-        res = pd.read_sql("""
-            SELECT COALESCE(SUM(total_venta), 0) as b 
-            FROM v_pedidos_dia 
-            WHERE fecha = (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
-        """, conn)
-        st.metric("Venta Total Hoy", f"${(res['b'].iloc[0] or 0):,.0f}")
-    with col2:
-        res = pd.read_sql("""
-            SELECT COUNT(*) as c 
-            FROM v_pedidos_dia 
-            WHERE fecha = (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
-        """, conn)
-        st.metric("Pedidos Totales", res['c'].iloc[0])
-    with col3:
-        res = pd.read_sql("SELECT COUNT(*) as c FROM log_conversaciones WHERE fecha::date = CURRENT_DATE", conn)
-        st.metric("Chats Atendidos", res['c'].iloc[0])
-
-    st.divider()
-    c1, c2 = st.columns(2)
-    with c1:
-        st.subheader("🎯 Ventas: Agente vs Vendedores")
-        query_torta = """
-            SELECT 
-                CASE WHEN v.nombre IS NULL THEN 'Agente (Venta Directa)' ELSE 'Vendedores Oficiales' END as tipo,
-                SUM(p.total_venta) as total
-            FROM v_pedidos_dia p
-            LEFT JOIN vendedores v ON p.cliente_whatsapp = v.whatsapp
-            WHERE p.fecha = (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
-            GROUP BY tipo
-        """
-        df_t = pd.read_sql(query_torta, conn)
-        if not df_t.empty:
-            fig_t = px.pie(df_t, values='total', names='tipo', hole=.4, color_discrete_sequence=['#2e7d32', '#81c784'])
-            st.plotly_chart(fig_t, use_container_width=True)
-        else:
-            st.info("Sin ventas registradas hoy.")
-
-    with c2:
-        st.subheader("⚠️ Stock Crítico")
-        df_s = pd.read_sql("SELECT nombre, stock FROM productos WHERE stock >= 0 AND stock < 15 ORDER BY stock ASC LIMIT 8", conn)
-        st.dataframe(df_s, use_container_width=True)
-
-    st.divider()
-    st.subheader("📋 Pedidos del Día")
-    df_pedidos_hoy = pd.read_sql("""
-        SELECT 
-            cliente_final_nombre as Cliente,
-            total_venta as Total,
-            estado as Estado,
-            origen as Origen
-        FROM v_pedidos_dia
-        WHERE fecha = (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
-        ORDER BY cliente_final_nombre
-    """, conn)
-    if not df_pedidos_hoy.empty:
-        st.dataframe(df_pedidos_hoy, use_container_width=True)
-    else:
-        st.info("Sin pedidos registrados hoy.")
-
-    conn.close()
-
-# --- 2. ANALÍTICAS SEMANALES (GRÁFICOS DE BARRA) ---
-elif menu == "📊 Analíticas Semanales":
-    st.header("📅 Rendimiento de los últimos 7 días")
-    
-    try:
-        conn = get_connection()
-        
-        # Query para Ventas y Pedidos desde v_pedidos_dia
-        query_pedidos = """
-            SELECT 
-                fecha, 
-                SUM(total_venta) as total_venta, 
-                COUNT(*) as pedidos 
-            FROM v_pedidos_dia
-            WHERE fecha >= (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date - INTERVAL '7 days' 
-            GROUP BY fecha 
-            ORDER BY fecha ASC
-        """
-        df_pedidos = pd.read_sql(query_pedidos, conn)
-
-        # Query para Chats Atendidos
-        query_chats = """
-            SELECT fecha::date as fecha, COUNT(*) as chats 
-            FROM log_conversaciones 
-            WHERE tipo_mensaje = 'incoming' 
-            AND fecha >= CURRENT_DATE - INTERVAL '7 days' 
-            GROUP BY fecha::date 
-            ORDER BY fecha::date ASC
-        """
-        df_chats = pd.read_sql(query_chats, conn)
-        
-        conn.close()
-
-        col1, col2, col3 = st.columns(3)
-
-        with col1:
-            st.subheader("💰 Venta Total por Día")
-            if not df_pedidos.empty:
-                st.bar_chart(df_pedidos, x="fecha", y="total_venta", color="#2e7d32")
-            else:
-                st.info("Sin datos de ventas.")
-
-        with col2:
-            st.subheader("📦 Pedidos por Día")
-            if not df_pedidos.empty:
-                st.bar_chart(df_pedidos, x="fecha", y="pedidos", color="#1976d2")
-            else:
-                st.info("Sin datos de pedidos.")
-
-        with col3:
-            st.subheader("💬 Chats Atendidos")
-            if not df_chats.empty:
-                st.bar_chart(df_chats, x="fecha", y="chats", color="#f57c00") 
-            else:
-                st.info("Sin actividad de chats.")
-
-    except Exception as e:
-        st.error(f"Error al cargar las analíticas semanales: {e}")
-
-# --- 3. GESTIÓN DE VENDEDORES (CRUD) ---
-elif menu == "👥 Gestión de Vendedores":
-    st.header("👥 Administrar Vendedores")
+def check_login(username, password):
     conn = get_connection()
     cur = conn.cursor()
-    
-    st.subheader("Personas que escribieron (Sugeridos para Vendedor)")
-    recientes = pd.read_sql("SELECT DISTINCT nombre, whatsapp FROM clientes ORDER BY whatsapp DESC LIMIT 10", conn)
-    for i, r in recientes.iterrows():
-        if st.button(f"Hacer Vendedor a: {r['nombre']} ({r['whatsapp']})", key=f"btn_{r['whatsapp']}"):
-            cur.execute("INSERT INTO vendedores (whatsapp, nombre) VALUES (%s, %s) ON CONFLICT (whatsapp) DO UPDATE SET nombre = EXCLUDED.nombre", (r['whatsapp'], r['nombre']))
-            conn.commit()
-            st.rerun()
-
-    st.divider()
-    st.subheader("Vendedores Actuales")
-    vendedores = pd.read_sql("SELECT * FROM vendedores", conn)
-    for i, v in vendedores.iterrows():
-        c1, c2 = st.columns([4, 1])
-        c1.write(f"👤 **{v['nombre']}** | ID: {v['whatsapp']}")
-        if c2.button("Dar de Baja", key=f"del_{v['whatsapp']}"):
-            cur.execute("DELETE FROM vendedores WHERE whatsapp = %s", (v['whatsapp'],))
-            conn.commit()
-            st.rerun()
+    cur.execute("SELECT password_hash FROM usuarios_ui WHERE usuario = %s", (username,))
+    record = cur.fetchone()
     conn.close()
-
-# --- 4. CRM CHATWOOT ---
-elif menu == "💬 CRM Chatwoot":
-    st.header("💬 CRM Chatwoot")
-    st.link_button("🚀 Abrir Chatwoot Pantalla Completa", "https://agentes-chatwoot.xjkmv6.easypanel.host/")
-    st.components.v1.iframe("https://agentes-chatwoot.xjkmv6.easypanel.host/", height=700, scrolling=True)
-
-
-# --- 5. CARGA DE STOCK ---
-elif menu == "📤 Carga de Stock":
-    st.header("📤 Actualizar Inventario")
     
-    try:
-        conn = get_connection()
-        ultimo = pd.read_sql("SELECT nombre_archivo, fecha_proceso AT TIME ZONE 'UTC' AT TIME ZONE 'America/Argentina/Buenos_Aires' as fecha FROM control_cargas ORDER BY fecha_proceso DESC LIMIT 1", conn)
-        if not ultimo.empty:
-            st.info(f"Último archivo procesado: **{ultimo.iloc[0,0]}** (el {ultimo.iloc[0,1].strftime('%d/%m/%Y %H:%M')})")
-        conn.close()
-    except Exception as e:
-        st.warning("No se pudo conectar a la base de datos para ver el historial.")
+    if record:
+        if record[0] == hash_password(password):
+            return True
+    return False
 
-    archivo = st.file_uploader("Sube el CSV del día", type=["csv"])
+# Inicializar estado de sesión
+if 'autenticado' not in st.session_state:
+    st.session_state['autenticado'] = False
+
+# --- PANTALLA DE LOGIN ---
+if not st.session_state['autenticado']:
+    st.markdown("<h1 style='text-align: center; color: #2e7d32;'>🍏 Ciuccoli Hnos - Acceso</h1>", unsafe_allow_html=True)
     
-    if archivo:
-        if st.button("Procesar y Actualizar Stock"):
-            url_n8n = "https://agentes-n8n.xjkmv6.easypanel.host/webhook/subir-stock-manual"
-            files = {'file': (archivo.name, archivo.getvalue(), 'text/csv')}
+    col1, col2, col3 = st.columns([1,2,1])
+    with col2:
+        with st.form("login_form"):
+            user = st.text_input("Usuario")
+            pwd = st.text_input("Contraseña", type="password")
+            submit = st.form_submit_button("Ingresar al Sistema")
             
-            with st.spinner("Enviando archivo a n8n..."):
-                try:
-                    res = requests.post(url_n8n, files=files, timeout=20)
-                    
-                    if res.status_code == 200:
-                        st.success("✅ ¡Éxito! El stock ha sido actualizado.")
-                    elif res.status_code == 400:
-                        try:
-                            msg = res.json().get("mensaje", "Archivo duplicado.")
-                        except:
-                            msg = "Archivo rechazado por reglas de negocio."
-                        st.warning(f"⚠️ {msg}")
-                    else:
-                        st.error(f"❌ Error del servidor de n8n (Código {res.status_code})")
+            if submit:
+                if check_login(user, pwd):
+                    st.session_state['autenticado'] = True
+                    st.session_state['usuario_actual'] = user
+                    st.rerun()
+                else:
+                    st.error("❌ Usuario o contraseña incorrectos.")
+else:
+    # --- PANTALLA PRINCIPAL (Solo si está logueado) ---
+    
+    # Botón de Cerrar Sesión arriba a la derecha
+    c1, c2 = st.columns([8, 1])
+    with c2:
+        if st.button("🚪 Cerrar Sesión"):
+            st.session_state['autenticado'] = False
+            st.rerun()
 
-                except requests.exceptions.Timeout:
-                    st.warning("⏳ El servidor tardó en responder. Verifica el log en 2 minutos.")
-                
-                except requests.exceptions.RequestException as e:
-                    st.error("❌ No se pudo conectar con n8n. Revisa que el Webhook esté activo.")
-# --- 6. CONECTAR WHATSAPP ---
-elif menu == "📱 Conectar WhatsApp":
-    st.header("📱 Conectar WhatsApp al Agente")
-    st.info("Escaneá el código QR con tu WhatsApp para vincular tu número al agente. Una vez conectado, el agente comenzará a recibir y responder mensajes automáticamente.")
-    st.components.v1.iframe("https://agentes-puentewhatsapp.xjkmv6.easypanel.host/", height=700, scrolling=True)
-    st.caption("⚠️ Si el QR no carga, verificá que el servicio de puente WhatsApp esté activo en Easypanel.")
+    st.title("🍏 Panel de Control - Ciuccoli Hnos")
+
+    menu = st.sidebar.selectbox("Navegación", ["📈 Dashboard Hoy", "📊 Analíticas Semanales", "👥 Gestión de Vendedores", "💬 CRM Chatwoot", "📤 Carga de Stock"])
+
+    # (AQUÍ PEGAS TODO EL RESTO DE TU CÓDIGO ACTUAL)
+    # Por ejemplo, el bloque if menu == "📈 Dashboard Hoy": ... etc.
+    
+    # --- 1. DASHBOARD HOY ---
+    if menu == "📈 Dashboard Hoy":
+        st.header("📊 Resultados del Día")
+        conn = get_connection()
+        # ... (Tu código actual del Dashboard)
+        conn.close()
+
+    # ... (Pega el resto de los menús aquí respetando la indentación)
