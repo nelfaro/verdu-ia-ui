@@ -77,7 +77,7 @@ else:
         st.image("https://cdn-icons-png.flaticon.com/512/2329/2329865.png", width=80)
         st.markdown(f"**Usuario:** {st.session_state['usuario_actual']}")
         st.divider()
-        menu = st.radio("Navegación", ["📈 Dashboard Hoy", "📊 Analíticas Semanales", "👥 Gestión de Vendedores", "💬 CRM Chatwoot", "📱 Conectar WhatsApp", "📤 Carga de Stock"])
+        menu = st.radio("Navegación", ["📈 Dashboard Hoy", "📊 Analíticas Semanales", "👥 Gestión de Vendedores", "💬 CRM Chatwoot", "📱 Conectar WhatsApp", "📤 Carga de Stock", "⚙️ Configuración del Agente"])
         st.divider()
         if st.button("🚪 Cerrar Sesión", use_container_width=True):
             st.session_state['autenticado'] = False
@@ -318,3 +318,56 @@ else:
                         st.warning("⏳ El servidor tardó en responder. Verifica el log en unos minutos.")
                     except Exception as e:
                         st.error(f"❌ Fallo de conexión: {e}")
+
+    # ==========================================
+    # PESTAÑA 7: CONFIGURACIÓN DEL AGENTE
+    # ==========================================
+    elif menu == "⚙️ Configuración del Agente":
+        st.header("⚙️ Configuración General de la IA")
+        st.write("Controla las reglas de negocio y el comportamiento del asistente virtual.")
+        
+        conn = get_connection()
+        cur = conn.cursor()
+        
+        # 1. Obtenemos el estado actual desde la base de datos
+        cur.execute("SELECT valor FROM configuracion WHERE clave = 'verificacion_clientes'")
+        resultado = cur.fetchone()
+        
+        # Si la clave existe y es 'true', el switch estará activado. Si no, apagado.
+        estado_actual = True if resultado and resultado[0] == 'true' else False
+
+        # 2. Interfaz Visual (Tarjeta de configuración)
+        with st.container():
+            st.markdown("""
+            <div style="background-color: white; padding: 20px; border-radius: 8px; border: 1px solid #ddd; margin-bottom: 20px;">
+                <h4 style="margin-top: 0; color: #1f2937;">Seguridad y Acceso</h4>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # El Switch visual (Toggle)
+            nuevo_estado = st.toggle("🔒 Exigir Verificación de Clientes", value=estado_actual, help="Si se activa, el Agente solo atenderá a clientes que ya estén registrados en el sistema.")
+            
+            # Botón para guardar
+            if st.button("💾 Guardar Configuración", type="primary"):
+                valor_sql = 'true' if nuevo_estado else 'false'
+                
+                # Intentamos actualizar. Si no actualiza ninguna fila (porque la clave no existía), la insertamos.
+                cur.execute("UPDATE configuracion SET valor = %s WHERE clave = 'verificacion_clientes'", (valor_sql,))
+                if cur.rowcount == 0:
+                    cur.execute("INSERT INTO configuracion (clave, valor) VALUES ('verificacion_clientes', %s)", (valor_sql,))
+                
+                conn.commit()
+                st.success("✅ Configuración guardada correctamente. El Agente aplicará esta regla de inmediato.")
+                st.rerun()
+
+        # 3. Sección "Próximamente" (Para mostrarle al dueño lo que se viene)
+        st.divider()
+        st.subheader("🔜 Próximas Funcionalidades")
+        st.info("""
+        En futuras actualizaciones podrás configurar aquí:
+        * 🕒 **Horarios de Atención:** (Apertura y cierre de toma de pedidos).
+        * 🏢 **Información de la Empresa:** (Dirección, CBU para pagos, avisos de feriados).
+        * 🚚 **Días de Logística:** (Avisos automáticos de ingreso de mercadería).
+        """)
+        
+        conn.close()
