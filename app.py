@@ -177,55 +177,66 @@ else:
         st.header("📅 Rendimiento de los últimos 7 días")
         conn = get_connection()
         
+        # Generamos un calendario de 7 días y cruzamos los datos de ventas
         query_hist = """
+            WITH dias AS (
+                SELECT generate_series(
+                    (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date - INTERVAL '6 days', 
+                    (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date, 
+                    '1 day'::interval
+                )::date AS fecha_calendario
+            )
             SELECT 
-                c.fecha, 
-                SUM(COALESCE((item->>'cantidad')::numeric * ((item->>'precio')::numeric - f.precio_costo), 0)) as beneficio,
-                COUNT(DISTINCT c.id) as pedidos 
-            FROM carga_sesiones c
-            LEFT JOIN LATERAL jsonb_array_elements(c.anotados) as item ON true
+                d.fecha_calendario AS fecha, 
+                COALESCE(SUM((item->>'cantidad')::numeric * ((item->>'precio')::numeric - COALESCE(f.precio_costo, 0))), 0) AS beneficio,
+                COUNT(DISTINCT c.id) AS pedidos 
+            FROM dias d
+            LEFT JOIN carga_sesiones c 
+                ON c.fecha = d.fecha_calendario 
+                AND c.estado != 'cancelado' 
+                AND jsonb_typeof(c.anotados) = 'array'
+            LEFT JOIN LATERAL jsonb_array_elements(c.anotados) as item ON c.id IS NOT NULL
             LEFT JOIN foto_stock_diario f ON f.nombre = item->>'nombre'
-            WHERE c.fecha >= CURRENT_DATE - INTERVAL '7 days'
-            AND c.estado != 'cancelado'
-            AND jsonb_typeof(c.anotados) = 'array'
-            GROUP BY c.fecha 
-            ORDER BY c.fecha ASC
+            GROUP BY d.fecha_calendario 
+            ORDER BY d.fecha_calendario ASC
         """
         df_hist = pd.read_sql(query_hist, conn)
 
         query_chats = """
-            SELECT fecha::date as fecha, COUNT(*) as chats 
-            FROM log_conversaciones 
-            WHERE tipo_mensaje = 'incoming' 
-            AND fecha >= CURRENT_DATE - INTERVAL '7 days' 
-            GROUP BY fecha::date 
-            ORDER BY fecha::date ASC
+            WITH dias AS (
+                SELECT generate_series(
+                    (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date - INTERVAL '6 days', 
+                    (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date, 
+                    '1 day'::interval
+                )::date AS fecha_calendario
+            )
+            SELECT 
+                d.fecha_calendario AS fecha, 
+                COUNT(l.id) AS chats 
+            FROM dias d
+            LEFT JOIN log_conversaciones l 
+                ON l.fecha::date = d.fecha_calendario 
+                AND l.tipo_mensaje = 'incoming'
+            GROUP BY d.fecha_calendario 
+            ORDER BY d.fecha_calendario ASC
         """
         df_chats = pd.read_sql(query_chats, conn)
         conn.close()
 
+        # Mostramos los gráficos
         col1, col2, col3 = st.columns(3)
 
         with col1:
             st.subheader("💰 Beneficio por Día")
-            if not df_hist.empty:
-                st.bar_chart(df_hist, x="fecha", y="beneficio", color="#2e7d32")
-            else:
-                st.info("Sin datos.")
+            st.bar_chart(df_hist, x="fecha", y="beneficio", color="#2e7d32")
 
         with col2:
             st.subheader("📦 Pedidos Cerrados")
-            if not df_hist.empty:
-                st.bar_chart(df_hist, x="fecha", y="pedidos", color="#1976d2")
-            else:
-                st.info("Sin datos.")
+            st.bar_chart(df_hist, x="fecha", y="pedidos", color="#1976d2")
 
         with col3:
             st.subheader("💬 Chats Atendidos")
-            if not df_chats.empty:
-                st.bar_chart(df_chats, x="fecha", y="chats", color="#f57c00") 
-            else:
-                st.info("Sin datos.")
+            st.bar_chart(df_chats, x="fecha", y="chats", color="#f57c00")
 
     # ==========================================
     # PESTAÑA 3: GESTIÓN DE VENDEDORES
