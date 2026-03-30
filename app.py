@@ -330,7 +330,7 @@ else:
                     except Exception as e:
                         st.error(f"❌ Fallo de conexión: {e}")
 
-   # ==========================================
+    # ==========================================
     # PESTAÑA 6: CONFIGURACIÓN DEL AGENTE Y NEGOCIO
     # ==========================================
     elif menu == "⚙️ Configuración del Agente":
@@ -340,95 +340,82 @@ else:
         conn = get_connection()
         cur = conn.cursor()
         
-        # 1. Obtenemos los estados actuales de la DB para mostrarlos en pantalla
+        # 1. Leer estado actual
         cur.execute("SELECT clave, valor FROM configuracion")
         config_db = {row[0]: row[1] for row in cur.fetchall()}
         
         cur.execute("SELECT mensaje_comercial FROM info_negocio ORDER BY id DESC LIMIT 1")
         info_db = cur.fetchone()
-        mensaje_actual = info_db[0] if info_db else "Horario normal de 08:00 a 20:00 hs."
+        mensaje_actual = info_db[0] if info_db else "Horario normal de 07:00 a 13:00 hs."
 
-        # --- SECCIÓN A: SEGURIDAD ---
-        st.subheader("🔒 Seguridad y Acceso")
-        with st.container():
-            st.markdown("<div style='background: white; padding: 20px; border-radius: 8px; border: 1px solid #ddd; margin-bottom: 20px;'>", unsafe_allow_html=True)
+        # --- FORMULARIO MAESTRO ---
+        with st.form("config_form"):
             
-            # Switch visual (Lee 'true' o 'false' de la base de datos)
+            # SECCIÓN A: SEGURIDAD
+            st.subheader("🔒 Seguridad y Acceso")
             estado_verif = True if config_db.get('verificacion_clientes') == 'true' else False
-            nuevo_estado_verif = st.toggle("Exigir Verificación de Clientes (Solo usuarios registrados)", value=estado_verif)
-            
-            st.markdown("</div>", unsafe_allow_html=True)
+            nuevo_estado_verif = st.checkbox("Exigir Verificación de Clientes (Solo usuarios registrados)", value=estado_verif)
+            st.divider()
 
-        # --- SECCIÓN B: HORARIOS ---
-        st.subheader("🕒 Horarios de Cierre (Prorrateo)")
-        with st.container():
-            st.markdown("<div style='background: white; padding: 20px; border-radius: 8px; border: 1px solid #ddd; margin-bottom: 20px;'>", unsafe_allow_html=True)
-            
-            # Rescatamos la hora actual guardada (por defecto 20:00)
-            hora_actual_str = config_db.get('hora_cierre', '20:00')
-            hora_obj = pd.to_datetime(hora_actual_str, format='%H:%M').time()
-            
-            # --- AQUÍ ESTÁ EL CAMPO DONDE EL DUEÑO MODIFICA LA HORA ---
-            nueva_hora = st.time_input("Hora exacta de Cierre de Jornada", value=hora_obj)
-            st.caption("A esta hora, el servidor dejará de tomar pedidos, calculará el stock disponible, generará los tickets de impresión y te enviará el resumen financiero.")
-            
-            st.markdown("</div>", unsafe_allow_html=True)
-
-        # --- SECCIÓN C: INFORMACIÓN PÚBLICA ---
-        st.subheader("📢 Información de la Empresa (Para la IA)")
-        with st.container():
-            st.markdown("<div style='background: white; padding: 20px; border-radius: 8px; border: 1px solid #ddd; margin-bottom: 20px;'>", unsafe_allow_html=True)
-            st.write("Este texto es el 'cerebro' de la IA cuando un cliente pregunte por horarios, dirección, feriados o información general del local.")
-            
-            # Área de texto editable por el dueño
-            nuevo_mensaje = st.text_area("Mensaje Comercial Actual", value=mensaje_actual, height=150)
-            
-            st.markdown("</div>", unsafe_allow_html=True)
-
-        # --- BOTÓN DE GUARDADO MAESTRO ---
-        if st.button("💾 Guardar Toda la Configuración", type="primary", use_container_width=True):
+            # SECCIÓN B: HORARIOS
+            st.subheader("🕒 Horarios de Cierre (Prorrateo)")
+            hora_actual_str = config_db.get('hora_cierre', '22:00')
             try:
-                # 1. Guardar Seguridad en DB
+                hora_obj = pd.to_datetime(hora_actual_str, format='%H:%M').time()
+            except:
+                hora_obj = pd.to_datetime('20:00', format='%H:%M').time()
+            
+            nueva_hora = st.time_input("Hora exacta de Cierre de Jornada", value=hora_obj)
+            st.caption("A esta hora, el servidor dejará de tomar pedidos y generará los tickets.")
+            st.divider()
+
+            # SECCIÓN C: INFO PÚBLICA
+            st.subheader("📢 Información de la Empresa (Para la IA)")
+            st.write("Este texto es el 'cerebro' de la IA cuando un cliente pregunte por horarios, dirección o feriados.")
+            nuevo_mensaje = st.text_area("Mensaje Comercial Actual", value=mensaje_actual, height=150)
+
+            # BOTÓN DE GUARDAR
+            st.write("")
+            submit_config = st.form_submit_button("💾 Guardar Toda la Configuración", use_container_width=True)
+
+        # LÓGICA DE GUARDADO
+        if submit_config:
+            try:
+                # 1. DB: Seguridad
                 val_verif = 'true' if nuevo_estado_verif else 'false'
                 cur.execute("UPDATE configuracion SET valor = %s WHERE clave = 'verificacion_clientes'", (val_verif,))
-                if cur.rowcount == 0:
-                    cur.execute("INSERT INTO configuracion (clave, valor) VALUES ('verificacion_clientes', %s)", (val_verif,))
                 
-                # 2. Guardar Horario en DB
+                # 2. DB: Horario
                 hora_str = nueva_hora.strftime('%H:%M')
                 cur.execute("UPDATE configuracion SET valor = %s WHERE clave = 'hora_cierre'", (hora_str,))
-                if cur.rowcount == 0:
-                    cur.execute("INSERT INTO configuracion (clave, valor) VALUES ('hora_cierre', %s)", (hora_str,))
                 
-                # 3. Guardar Mensaje Comercial en DB
+                # 3. DB: Mensaje
                 cur.execute("UPDATE info_negocio SET mensaje_comercial = %s", (nuevo_mensaje,))
-                if cur.rowcount == 0:
-                    cur.execute("INSERT INTO info_negocio (mensaje_comercial) VALUES (%s)", (nuevo_mensaje,))
                 
                 conn.commit()
                 
-                # --- 4. MAGIA: LLAMADA A N8N PARA CAMBIAR EL RELOJ INTERNO ---
-                with st.spinner("Actualizando servidores internos..."):
+                # 4. N8N API: Actualizar Reloj
+                with st.spinner("Sincronizando reloj del servidor..."):
                     hora, minuto = hora_str.split(':')
                     
-                    # REEMPLAZA CON LA URL DE TU WEBHOOK "ACTUALIZAR HORARIO"
+                    # === ATENCIÓN: VERIFICA ESTA URL ===
                     webhook_n8n_api = "https://agentes-n8n.xjkmv6.easypanel.host/webhook/actualizar-horario"
                     
                     payload = {
                         "hora": int(hora),
                         "minuto": int(minuto),
-                        # REEMPLAZA ESTO POR EL ID DE TU WORKFLOW DE CIERRE (EJ: 'DioxijelnkUSePk9')
+                        # === ATENCIÓN: VERIFICA ESTE ID ===
                         "workflow_id": "L3Y8NKwOaPX2D8xa" 
                     }
                     
                     try:
                         res = requests.post(webhook_n8n_api, json=payload, timeout=10)
                         if res.status_code == 200:
-                            st.success(f"✅ ¡Éxito! Base de datos actualizada y el reloj de cierre se reprogramó para las {hora_str} hs.")
+                            st.success(f"✅ ¡Éxito! Base de datos actualizada y el reloj se reprogramó para las {hora_str} hs.")
                         else:
-                            st.warning(f"Configuración guardada en la base de datos, pero el reloj del servidor no respondió (Código {res.status_code}).")
+                            st.warning(f"Configuración guardada en la base de datos, pero el webhook de n8n devolvió el código {res.status_code}. Asegúrate de que la URL del webhook sea la de Producción y no la de Test.")
                     except Exception as api_err:
-                        st.warning("Configuración en BD exitosa. (Aviso: El Webhook de actualización de n8n no está conectado o tardó en responder).")
+                        st.warning("Configuración en BD exitosa. (Aviso: El Webhook de n8n no está conectado).")
 
             except Exception as e:
                 st.error(f"❌ Error al guardar en base de datos: {e}")
