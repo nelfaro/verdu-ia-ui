@@ -330,55 +330,108 @@ else:
                     except Exception as e:
                         st.error(f"❌ Fallo de conexión: {e}")
 
-    # ==========================================
-    # PESTAÑA 7: CONFIGURACIÓN DEL AGENTE
+   # ==========================================
+    # PESTAÑA 6: CONFIGURACIÓN DEL AGENTE Y NEGOCIO
     # ==========================================
     elif menu == "⚙️ Configuración del Agente":
-        st.header("⚙️ Configuración General de la IA")
-        st.write("Controla las reglas de negocio y el comportamiento del asistente virtual.")
+        st.header("⚙️ Configuración del Sistema y Negocio")
+        st.write("Controla las reglas de la IA, los horarios operativos y la información que ven los clientes.")
         
         conn = get_connection()
         cur = conn.cursor()
         
-        # 1. Obtenemos el estado actual desde la base de datos
-        cur.execute("SELECT valor FROM configuracion WHERE clave = 'verificacion_clientes'")
-        resultado = cur.fetchone()
+        # 1. Obtenemos los estados actuales de la DB para mostrarlos en pantalla
+        cur.execute("SELECT clave, valor FROM configuracion")
+        config_db = {row[0]: row[1] for row in cur.fetchall()}
         
-        # Si la clave existe y es 'true', el switch estará activado. Si no, apagado.
-        estado_actual = True if resultado and resultado[0] == 'true' else False
+        cur.execute("SELECT mensaje_comercial FROM info_negocio ORDER BY id DESC LIMIT 1")
+        info_db = cur.fetchone()
+        mensaje_actual = info_db[0] if info_db else "Horario normal de 08:00 a 20:00 hs."
 
-        # 2. Interfaz Visual (Tarjeta de configuración)
+        # --- SECCIÓN A: SEGURIDAD ---
+        st.subheader("🔒 Seguridad y Acceso")
         with st.container():
-            st.markdown("""
-            <div style="background-color: white; padding: 20px; border-radius: 8px; border: 1px solid #ddd; margin-bottom: 20px;">
-                <h4 style="margin-top: 0; color: #1f2937;">Seguridad y Acceso</h4>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown("<div style='background: white; padding: 20px; border-radius: 8px; border: 1px solid #ddd; margin-bottom: 20px;'>", unsafe_allow_html=True)
             
-            # El Switch visual (Toggle)
-            nuevo_estado = st.toggle("🔒 Exigir Verificación de Clientes", value=estado_actual, help="Si se activa, el Agente solo atenderá a clientes que ya estén registrados en el sistema.")
+            # Switch visual (Lee 'true' o 'false' de la base de datos)
+            estado_verif = True if config_db.get('verificacion_clientes') == 'true' else False
+            nuevo_estado_verif = st.toggle("Exigir Verificación de Clientes (Solo usuarios registrados)", value=estado_verif)
             
-            # Botón para guardar
-            if st.button("💾 Guardar Configuración", type="primary"):
-                valor_sql = 'true' if nuevo_estado else 'false'
-                
-                # Intentamos actualizar. Si no actualiza ninguna fila (porque la clave no existía), la insertamos.
-                cur.execute("UPDATE configuracion SET valor = %s WHERE clave = 'verificacion_clientes'", (valor_sql,))
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        # --- SECCIÓN B: HORARIOS ---
+        st.subheader("🕒 Horarios de Cierre (Prorrateo)")
+        with st.container():
+            st.markdown("<div style='background: white; padding: 20px; border-radius: 8px; border: 1px solid #ddd; margin-bottom: 20px;'>", unsafe_allow_html=True)
+            
+            # Rescatamos la hora actual guardada (por defecto 20:00)
+            hora_actual_str = config_db.get('hora_cierre', '20:00')
+            hora_obj = pd.to_datetime(hora_actual_str, format='%H:%M').time()
+            
+            # --- AQUÍ ESTÁ EL CAMPO DONDE EL DUEÑO MODIFICA LA HORA ---
+            nueva_hora = st.time_input("Hora exacta de Cierre de Jornada", value=hora_obj)
+            st.caption("A esta hora, el servidor dejará de tomar pedidos, calculará el stock disponible, generará los tickets de impresión y te enviará el resumen financiero.")
+            
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        # --- SECCIÓN C: INFORMACIÓN PÚBLICA ---
+        st.subheader("📢 Información de la Empresa (Para la IA)")
+        with st.container():
+            st.markdown("<div style='background: white; padding: 20px; border-radius: 8px; border: 1px solid #ddd; margin-bottom: 20px;'>", unsafe_allow_html=True)
+            st.write("Este texto es el 'cerebro' de la IA cuando un cliente pregunte por horarios, dirección, feriados o información general del local.")
+            
+            # Área de texto editable por el dueño
+            nuevo_mensaje = st.text_area("Mensaje Comercial Actual", value=mensaje_actual, height=150)
+            
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        # --- BOTÓN DE GUARDADO MAESTRO ---
+        if st.button("💾 Guardar Toda la Configuración", type="primary", use_container_width=True):
+            try:
+                # 1. Guardar Seguridad en DB
+                val_verif = 'true' if nuevo_estado_verif else 'false'
+                cur.execute("UPDATE configuracion SET valor = %s WHERE clave = 'verificacion_clientes'", (val_verif,))
                 if cur.rowcount == 0:
-                    cur.execute("INSERT INTO configuracion (clave, valor) VALUES ('verificacion_clientes', %s)", (valor_sql,))
+                    cur.execute("INSERT INTO configuracion (clave, valor) VALUES ('verificacion_clientes', %s)", (val_verif,))
+                
+                # 2. Guardar Horario en DB
+                hora_str = nueva_hora.strftime('%H:%M')
+                cur.execute("UPDATE configuracion SET valor = %s WHERE clave = 'hora_cierre'", (hora_str,))
+                if cur.rowcount == 0:
+                    cur.execute("INSERT INTO configuracion (clave, valor) VALUES ('hora_cierre', %s)", (hora_str,))
+                
+                # 3. Guardar Mensaje Comercial en DB
+                cur.execute("UPDATE info_negocio SET mensaje_comercial = %s", (nuevo_mensaje,))
+                if cur.rowcount == 0:
+                    cur.execute("INSERT INTO info_negocio (mensaje_comercial) VALUES (%s)", (nuevo_mensaje,))
                 
                 conn.commit()
-                st.success("✅ Configuración guardada correctamente. El Agente aplicará esta regla de inmediato.")
-                st.rerun()
+                
+                # --- 4. MAGIA: LLAMADA A N8N PARA CAMBIAR EL RELOJ INTERNO ---
+                with st.spinner("Actualizando servidores internos..."):
+                    hora, minuto = hora_str.split(':')
+                    
+                    # REEMPLAZA CON LA URL DE TU WEBHOOK "ACTUALIZAR HORARIO"
+                    webhook_n8n_api = "https://agentes-n8n.xjkmv6.easypanel.host/webhook/actualizar-horario"
+                    
+                    payload = {
+                        "hora": int(hora),
+                        "minuto": int(minuto),
+                        # REEMPLAZA ESTO POR EL ID DE TU WORKFLOW DE CIERRE (EJ: 'DioxijelnkUSePk9')
+                        "workflow_id": "TU_WORKFLOW_ID_DE_CIERRE" 
+                    }
+                    
+                    try:
+                        res = requests.post(webhook_n8n_api, json=payload, timeout=10)
+                        if res.status_code == 200:
+                            st.success(f"✅ ¡Éxito! Base de datos actualizada y el reloj de cierre se reprogramó para las {hora_str} hs.")
+                        else:
+                            st.warning(f"Configuración guardada en la base de datos, pero el reloj del servidor no respondió (Código {res.status_code}).")
+                    except Exception as api_err:
+                        st.warning("Configuración en BD exitosa. (Aviso: El Webhook de actualización de n8n no está conectado o tardó en responder).")
 
-        # 3. Sección "Próximamente" (Para mostrarle al dueño lo que se viene)
-        st.divider()
-        st.subheader("🔜 Próximas Funcionalidades")
-        st.info("""
-        En futuras actualizaciones podrás configurar aquí:
-        * 🕒 **Horarios de Atención:** (Apertura y cierre de toma de pedidos).
-        * 🏢 **Información de la Empresa:** (Dirección, CBU para pagos, avisos de feriados).
-        * 🚚 **Días de Logística:** (Avisos automáticos de ingreso de mercadería).
-        """)
-        
-        conn.close()
+            except Exception as e:
+                st.error(f"❌ Error al guardar en base de datos: {e}")
+                conn.rollback()
+            finally:
+                conn.close()
