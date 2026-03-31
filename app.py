@@ -374,31 +374,26 @@ else:
                     else:
                         st.warning("Completa ambos campos.")
         with col_der:
-            st.subheader("📋 Sinónimos Registrados")
-            try:
-                df_sinonimos = pd.read_sql(
-                    "SELECT * FROM sinonimos_productos ORDER BY termino ASC, sinonimo ASC", 
-                    conn
-                )
-                
-                if not df_sinonimos.empty:
-                    termino_actual = None
-                    for i, row in df_sinonimos.iterrows():
-                        if row['termino'] != termino_actual:
-                            termino_actual = row['termino']
-                            st.markdown(f"---")
-                            st.markdown(f"🗣️ **{row['termino']}**")
-                        c1, c2 = st.columns([3, 1])
-                        c1.write(f"  └ 💾 {row['sinonimo']}")
-                        if c2.button("🗑️", key=f"del_sin_{row['id']}"):
-                            cur.execute("DELETE FROM sinonimos_productos WHERE id = %s", (row['id'],))
-                            conn.commit()
-                            st.rerun()
-                else:
-                    st.info("No hay sinónimos registrados aún.")
-            except Exception as e:
-                st.error(f"Error al cargar la tabla: {e}")
-                
+              st.subheader("📋 Sinónimos Registrados")
+              try:
+                  df_sinonimos = pd.read_sql(
+                      "SELECT * FROM sinonimos_productos ORDER BY termino ASC, sinonimo ASC", 
+                      conn
+                  )
+                  
+                  if not df_sinonimos.empty:
+                      for i, row in df_sinonimos.iterrows():
+                          c1, c2, c3 = st.columns([2, 2, 1])
+                          c1.write(f"🗣️ **Dice:** {row['termino']}")
+                          c2.write(f"💾 **Busca:** {row['sinonimo']}")
+                          if c3.button("🗑️ Borrar", key=f"del_sin_{row['id']}"):
+                              cur.execute("DELETE FROM sinonimos_productos WHERE id = %s", (row['id'],))
+                              conn.commit()
+                              st.rerun()
+                  else:
+                      st.info("No hay sinónimos registrados aún.")
+              except Exception as e:
+                  st.error(f"Error al cargar la tabla: {e}")         
         conn.close()
     # ==========================================
     # PESTAÑA 7: CONFIGURACIÓN DEL AGENTE Y NEGOCIO
