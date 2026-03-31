@@ -335,71 +335,71 @@ else:
     # PESTAÑA 6: DICCIONARIO DE SINÓNIMOS
     # ==========================================
     elif menu == "📖 Diccionario de Sinónimos":
-    st.header("📖 Diccionario de la Inteligencia Artificial")
-    st.write("Enseña al Agente a entender cómo llaman los clientes a tus productos.")
-    
-    conn = get_connection()
-    cur = conn.cursor()
-    col_izq, col_der = st.columns([1, 2])
-    with col_izq:
-        st.subheader("➕ Nuevo Sinónimo")
-        with st.form("form_sinonimo"):
-            st.write("Ej: Cliente dice 'Zapallito' -> Sistema lee 'ZAP'")
-            st.write("Podés agregar varios sinónimos para la misma palabra.")
-            term_orig = st.text_input("Palabra del cliente (termino)").lower().strip()
-            sinonimo = st.text_input("Nombre en el sistema (sinonimo)").upper().strip()
-            
-            submit_sin = st.form_submit_button("💾 Guardar Sinónimo", use_container_width=True)
-            
-            if submit_sin:
-                if term_orig and sinonimo:
-                    try:
-                        cur.execute(
-                            "SELECT id FROM sinonimos_productos WHERE termino = %s AND sinonimo = %s", 
-                            (term_orig, sinonimo)
-                        )
-                        if cur.fetchone():
-                            st.warning("Esa combinación ya existe.")
-                        else:
+        st.header("📖 Diccionario de la Inteligencia Artificial")
+        st.write("Enseña al Agente a entender cómo llaman los clientes a tus productos.")
+        
+        conn = get_connection()
+        cur = conn.cursor()
+        col_izq, col_der = st.columns([1, 2])
+        with col_izq:
+            st.subheader("➕ Nuevo Sinónimo")
+            with st.form("form_sinonimo"):
+                st.write("Ej: Cliente dice 'Zapallito' -> Sistema lee 'ZAP'")
+                st.write("Podés agregar varios sinónimos para la misma palabra.")
+                term_orig = st.text_input("Palabra del cliente (termino)").lower().strip()
+                sinonimo = st.text_input("Nombre en el sistema (sinonimo)").upper().strip()
+                
+                submit_sin = st.form_submit_button("💾 Guardar Sinónimo", use_container_width=True)
+                
+                if submit_sin:
+                    if term_orig and sinonimo:
+                        try:
                             cur.execute(
-                                "INSERT INTO sinonimos_productos (termino, sinonimo) VALUES (%s, %s)", 
+                                "SELECT id FROM sinonimos_productos WHERE termino = %s AND sinonimo = %s", 
                                 (term_orig, sinonimo)
                             )
+                            if cur.fetchone():
+                                st.warning("Esa combinación ya existe.")
+                            else:
+                                cur.execute(
+                                    "INSERT INTO sinonimos_productos (termino, sinonimo) VALUES (%s, %s)", 
+                                    (term_orig, sinonimo)
+                                )
+                                conn.commit()
+                                st.success(f"✅ Agregado: {term_orig} -> {sinonimo}")
+                                st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ Error al guardar: {e}")
+                            conn.rollback()
+                    else:
+                        st.warning("Completa ambos campos.")
+        with col_der:
+            st.subheader("📋 Sinónimos Registrados")
+            try:
+                df_sinonimos = pd.read_sql(
+                    "SELECT * FROM sinonimos_productos ORDER BY termino ASC, sinonimo ASC", 
+                    conn
+                )
+                
+                if not df_sinonimos.empty:
+                    termino_actual = None
+                    for i, row in df_sinonimos.iterrows():
+                        if row['termino'] != termino_actual:
+                            termino_actual = row['termino']
+                            st.markdown(f"---")
+                            st.markdown(f"🗣️ **{row['termino']}**")
+                        c1, c2 = st.columns([3, 1])
+                        c1.write(f"  └ 💾 {row['sinonimo']}")
+                        if c2.button("🗑️", key=f"del_sin_{row['id']}"):
+                            cur.execute("DELETE FROM sinonimos_productos WHERE id = %s", (row['id'],))
                             conn.commit()
-                            st.success(f"✅ Agregado: {term_orig} -> {sinonimo}")
                             st.rerun()
-                    except Exception as e:
-                        st.error(f"❌ Error al guardar: {e}")
-                        conn.rollback()
                 else:
-                    st.warning("Completa ambos campos.")
-    with col_der:
-        st.subheader("📋 Sinónimos Registrados")
-        try:
-            df_sinonimos = pd.read_sql(
-                "SELECT * FROM sinonimos_productos ORDER BY termino ASC, sinonimo ASC", 
-                conn
-            )
-            
-            if not df_sinonimos.empty:
-                termino_actual = None
-                for i, row in df_sinonimos.iterrows():
-                    if row['termino'] != termino_actual:
-                        termino_actual = row['termino']
-                        st.markdown(f"---")
-                        st.markdown(f"🗣️ **{row['termino']}**")
-                    c1, c2 = st.columns([3, 1])
-                    c1.write(f"  └ 💾 {row['sinonimo']}")
-                    if c2.button("🗑️", key=f"del_sin_{row['id']}"):
-                        cur.execute("DELETE FROM sinonimos_productos WHERE id = %s", (row['id'],))
-                        conn.commit()
-                        st.rerun()
-            else:
-                st.info("No hay sinónimos registrados aún.")
-        except Exception as e:
-            st.error(f"Error al cargar la tabla: {e}")
-            
-    conn.close()
+                    st.info("No hay sinónimos registrados aún.")
+            except Exception as e:
+                st.error(f"Error al cargar la tabla: {e}")
+                
+        conn.close()
     # ==========================================
     # PESTAÑA 7: CONFIGURACIÓN DEL AGENTE Y NEGOCIO
     # ==========================================
