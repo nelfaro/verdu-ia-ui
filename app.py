@@ -77,7 +77,7 @@ else:
         st.image("https://cdn-icons-png.flaticon.com/512/2329/2329865.png", width=80)
         st.markdown(f"**Usuario:** {st.session_state['usuario_actual']}")
         st.divider()
-        menu = st.radio("Navegación", ["📈 Dashboard Hoy", "📊 Analíticas Semanales", "👥 Gestión de Vendedores", "💬 CRM Chatwoot", "📱 Conectar WhatsApp", "📤 Carga de Stock", "⚙️ Configuración del Agente"])
+        menu = st.radio("Navegación", ["📈 Dashboard Hoy", "📊 Analíticas Semanales", "👥 Gestión de Vendedores", "💬 CRM Chatwoot", "📱 Conectar WhatsApp", "📤 Carga de Stock", "📖 Diccionario de Sinónimos", "⚙️ Configuración del Agente"])
         st.divider()
         if st.button("🚪 Cerrar Sesión", use_container_width=True):
             st.session_state['autenticado'] = False
