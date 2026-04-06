@@ -188,15 +188,12 @@ else:
             )
             SELECT 
                 d.fecha_calendario AS fecha, 
-                COALESCE(SUM((item->>'cantidad')::numeric * ((item->>'precio')::numeric - COALESCE(f.precio_costo, 0))), 0) AS beneficio,
-                COUNT(DISTINCT c.id) AS pedidos 
+                COALESCE(SUM(p.beneficio), 0) AS beneficio,
+                COUNT(DISTINCT p.id) AS pedidos 
             FROM dias d
-            LEFT JOIN carga_sesiones c 
-                ON c.fecha = d.fecha_calendario 
-                AND c.estado != 'cancelado' 
-                AND jsonb_typeof(c.anotados) = 'array'
-            LEFT JOIN LATERAL jsonb_array_elements(c.anotados) as item ON c.id IS NOT NULL
-            LEFT JOIN foto_stock_diario f ON f.nombre = item->>'nombre'
+            LEFT JOIN pedidos p 
+                ON p.fecha = d.fecha_calendario 
+                AND p.estado = 'cerrado'
             GROUP BY d.fecha_calendario 
             ORDER BY d.fecha_calendario ASC
         """
