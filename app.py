@@ -137,9 +137,19 @@ else:
         # KPIs
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("Venta Total", f"${venta_total:,.0f}")
+            if venta_total >= 1000000:
+                st.metric("Venta Total", f"${venta_total/1000000:.1f}M")
+            elif venta_total >= 1000:
+                st.metric("Venta Total", f"${venta_total/1000:.0f}K")
+            else:
+                st.metric("Venta Total", f"${venta_total:,.0f}")
         with col2:
-            st.metric("Beneficio Neto", f"${beneficio:,.0f}")
+            if beneficio >= 1000000:
+                st.metric("Beneficio Neto", f"${beneficio/1000000:.1f}M")
+            elif beneficio >= 1000:
+                st.metric("Beneficio Neto", f"${beneficio/1000:.0f}K")
+            else:
+                st.metric("Beneficio Neto", f"${beneficio:,.0f}")
         with col3:
             st.metric("Pedidos", int(pedidos_tot))
         with col4:
