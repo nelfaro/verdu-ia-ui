@@ -93,8 +93,8 @@ else:
         conn = get_connection()
         
         # Selector de fecha
-        from datetime import date, timedelta
-        fecha_hoy = date.today()
+        from datetime import date, timedelta, datetime, timezone
+        fecha_hoy = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=-3))).date()
         fecha_sel = st.date_input("📅 Seleccionar fecha", value=fecha_hoy, max_value=fecha_hoy)
         es_hoy = fecha_sel == fecha_hoy
         
