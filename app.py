@@ -357,30 +357,30 @@ else:
     # PESTAÑA 6: CARGA DE STOCK
     # ==========================================
     elif menu == "📤 Carga de Stock":
-    st.header("📤 Actualizar Inventario")
-    
-    try:
-        conn = get_connection()
-        # 1. Usamos to_char para que Postgres devuelva el texto limpio sin que Python lo altere.
-        # 2. Usamos ORDER BY id DESC para garantizar que SIEMPRE traiga el último archivo subido, sin importar la hora.
-        query_ultimo = """
-            SELECT nombre_archivo, to_char(fecha_proceso, 'DD/MM/YYYY HH24:MI') as fecha_formateada 
-            FROM control_cargas 
-            ORDER BY id DESC 
-            LIMIT 1
-        """
-        ultimo = pd.read_sql(query_ultimo, conn)
+        st.header("📤 Actualizar Inventario")
         
-        if not ultimo.empty:
-            st.success(f"✅ Último archivo cargado: **{ultimo['nombre_archivo'].iloc[0]}** \n\n(Procesado en base de datos el: {ultimo['fecha_formateada'].iloc[0]} hs)")
-        conn.close()
+        try:
+            conn = get_connection()
+            # Usamos to_char para que Postgres devuelva el texto limpio y ORDER BY id DESC para el último real.
+            query_ultimo = """
+                SELECT nombre_archivo, to_char(fecha_proceso, 'DD/MM/YYYY HH24:MI') as fecha_formateada 
+                FROM control_cargas 
+                ORDER BY id DESC 
+                LIMIT 1
+            """
+            ultimo = pd.read_sql(query_ultimo, conn)
+            
+            if not ultimo.empty:
+                st.info(f"Último archivo procesado: **{ultimo['nombre_archivo'].iloc[0]}** (el {ultimo['fecha_formateada'].iloc[0]} hs)")
+            conn.close()
         except Exception as e:
-        st.warning(f"No se pudo cargar el historial de archivos. Detalle: {e}")
+            st.warning(f"No se pudo cargar el historial de archivos. Detalle: {e}")
 
         archivo = st.file_uploader("Sube el CSV del día", type=["csv"])
         
         if archivo:
             if st.button("Procesar y Actualizar Stock"):
+                # REEMPLAZA CON LA URL DE PRODUCCIÓN DE TU WEBHOOK
                 url_n8n = "https://agentes-n8n.xjkmv6.easypanel.host/webhook/subir-stock-manual"
                 files = {'file': (archivo.name, archivo.getvalue(), 'text/csv')}
                 
@@ -398,78 +398,165 @@ else:
                             st.warning(f"⚠️ {msg}")
                         else:
                             st.error(f"❌ Error del servidor (Código {res.status_code})")
+                    
                     except requests.exceptions.Timeout:
                         st.warning("⏳ El servidor tardó en responder. Verifica el log en unos minutos.")
                     except Exception as e:
-                        st.error(f"❌ Fallo de conexión: {e}")
+                        st.error(f"❌ Fallo de conexión con n8n: {e}")
 
-    
     # ==========================================
-    # PESTAÑA 6: DICCIONARIO DE SINÓNIMOS
+    # PESTAÑA 7: CONFIGURACIÓN DEL AGENTE Y NEGOCIO
+    # ==========================================
+    elif menu == "⚙️ Configuración del Agente":
+        st.header("⚙️ Configuración del Sistema y Negocio")
+        st.write("Controla las reglas de la IA, los horarios operativos y la información que ven los clientes.")
+        
+        try:
+            conn = get_connection()
+            cur = conn.cursor()
+            
+            # 1. Leer estado actual
+            cur.execute("SELECT clave, valor FROM configuracion")
+            config_db = {row[0]: row[1] for row in cur.fetchall()}
+            
+            cur.execute("SELECT mensaje_comercial FROM info_negocio ORDER BY id DESC LIMIT 1")
+            info_db = cur.fetchone()
+            mensaje_actual = info_db[0] if info_db else "Horario normal de 08:00 a 20:00 hs."
+
+            # --- FORMULARIO MAESTRO ---
+            with st.form("config_form"):
+                
+                # SECCIÓN A: SEGURIDAD
+                st.subheader("🔒 Seguridad y Acceso")
+                estado_verif = True if config_db.get('verificacion_clientes') == 'true' else False
+                nuevo_estado_verif = st.checkbox("Exigir Verificación de Clientes (Solo usuarios registrados)", value=estado_verif)
+                st.divider()
+
+                # SECCIÓN B: HORARIOS
+                st.subheader("🕒 Horarios de Cierre (Prorrateo)")
+                hora_actual_str = config_db.get('hora_cierre', '22:00')
+                try:
+                    hora_obj = pd.to_datetime(hora_actual_str, format='%H:%M').time()
+                except:
+                    hora_obj = pd.to_datetime('22:00', format='%H:%M').time()
+                
+                nueva_hora = st.time_input("Hora exacta de Cierre de Jornada", value=hora_obj)
+                st.caption("A esta hora, el servidor dejará de tomar pedidos y generará los tickets.")
+                st.divider()
+
+                # SECCIÓN C: INFO PÚBLICA
+                st.subheader("📢 Información de la Empresa (Para la IA)")
+                st.write("Este texto es el 'cerebro' de la IA cuando un cliente pregunte por horarios, dirección o feriados.")
+                nuevo_mensaje = st.text_area("Mensaje Comercial Actual", value=mensaje_actual, height=150)
+
+                # BOTÓN DE GUARDAR
+                st.write("")
+                submit_config = st.form_submit_button("💾 Guardar Toda la Configuración", use_container_width=True)
+
+            # LÓGICA DE GUARDADO
+            if submit_config:
+                # 1. DB: Seguridad
+                val_verif = 'true' if nuevo_estado_verif else 'false'
+                cur.execute("UPDATE configuracion SET valor = %s WHERE clave = 'verificacion_clientes'", (val_verif,))
+                if cur.rowcount == 0:
+                    cur.execute("INSERT INTO configuracion (clave, valor) VALUES ('verificacion_clientes', %s)", (val_verif,))
+                
+                # 2. DB: Horario
+                hora_str = nueva_hora.strftime('%H:%M')
+                cur.execute("UPDATE configuracion SET valor = %s WHERE clave = 'hora_cierre'", (hora_str,))
+                if cur.rowcount == 0:
+                    cur.execute("INSERT INTO configuracion (clave, valor) VALUES ('hora_cierre', %s)", (hora_str,))
+                
+                # 3. DB: Mensaje
+                cur.execute("UPDATE info_negocio SET mensaje_comercial = %s", (nuevo_mensaje,))
+                if cur.rowcount == 0:
+                    cur.execute("INSERT INTO info_negocio (mensaje_comercial) VALUES (%s)", (nuevo_mensaje,))
+                
+                conn.commit()
+                
+                # 4. N8N API: Actualizar Reloj
+                with st.spinner("Sincronizando reloj del servidor..."):
+                    hora, minuto = hora_str.split(':')
+                    
+                    # REEMPLAZA CON LA URL DE TU WEBHOOK DE n8n
+                    webhook_n8n_api = "https://agentes-n8n.xjkmv6.easypanel.host/webhook/actualizar-horario"
+                    
+                    payload = {
+                        "hora": int(hora),
+                        "minuto": int(minuto),
+                        # REEMPLAZA CON EL ID DE TU WORKFLOW DE CIERRE
+                        "workflow_id": "DioxijelnkUSePk9" 
+                    }
+                    
+                    try:
+                        res = requests.post(webhook_n8n_api, json=payload, timeout=10)
+                        if res.status_code == 200:
+                            st.success(f"✅ ¡Éxito! Base de datos actualizada y el reloj se reprogramó para las {hora_str} hs.")
+                        else:
+                            st.warning(f"Configuración guardada en la BD, pero el webhook de n8n devolvió el código {res.status_code}.")
+                    except Exception as api_err:
+                        st.warning("Configuración en BD exitosa. (Aviso: El Webhook de n8n no respondió a tiempo).")
+                
+            conn.close()
+        except Exception as db_err:
+            st.error(f"❌ Error al cargar configuración: {db_err}")
+
+    # ==========================================
+    # PESTAÑA 8: DICCIONARIO DE SINÓNIMOS
     # ==========================================
     elif menu == "📖 Diccionario de Sinónimos":
         st.header("📖 Diccionario de la Inteligencia Artificial")
         st.write("Enseña al Agente a entender cómo llaman los clientes a tus productos.")
         
-        conn = get_connection()
-        cur = conn.cursor()
-        col_izq, col_der = st.columns([1, 2])
-        with col_izq:
-            st.subheader("➕ Nuevo Sinónimo")
-            with st.form("form_sinonimo"):
-                st.write("Ej: Cliente dice 'Zapallito' -> Sistema lee 'ZAP'")
-                st.write("Podés agregar varios sinónimos para la misma palabra.")
-                term_orig = st.text_input("Palabra del cliente (termino)").lower().strip()
-                sinonimo = st.text_input("Nombre en el sistema (sinonimo)").upper().strip()
-                
-                submit_sin = st.form_submit_button("💾 Guardar Sinónimo", use_container_width=True)
-                
-                if submit_sin:
-                    if term_orig and sinonimo:
-                        try:
-                            cur.execute(
-                                "SELECT id FROM sinonimos_productos WHERE termino = %s AND sinonimo = %s", 
-                                (term_orig, sinonimo)
-                            )
+        try:
+            conn = get_connection()
+            cur = conn.cursor()
+
+            col_izq, col_der = st.columns([1, 2])
+
+            with col_izq:
+                st.subheader("➕ Nuevo Sinónimo")
+                with st.form("form_sinonimo"):
+                    st.write("Ej: Cliente dice 'Zapallito' -> Sistema lee 'ZAP'")
+                    term_orig = st.text_input("Palabra del cliente (termino)").lower().strip()
+                    sinonimo = st.text_input("Nombre en el sistema (sinonimo)").upper().strip()
+                    
+                    submit_sin = st.form_submit_button("💾 Guardar Sinónimo", use_container_width=True)
+                    
+                    if submit_sin:
+                        if term_orig and sinonimo:
+                            cur.execute("SELECT id FROM sinonimos_productos WHERE termino = %s", (term_orig,))
                             if cur.fetchone():
-                                st.warning("Esa combinación ya existe.")
+                                st.warning("Esa palabra ya tiene un sinónimo. Bórralo primero en la lista.")
                             else:
-                                cur.execute(
-                                    "INSERT INTO sinonimos_productos (termino, sinonimo) VALUES (%s, %s)", 
-                                    (term_orig, sinonimo)
-                                )
+                                cur.execute("INSERT INTO sinonimos_productos (termino, sinonimo) VALUES (%s, %s)", (term_orig, sinonimo))
                                 conn.commit()
                                 st.success(f"✅ Agregado: {term_orig} -> {sinonimo}")
                                 st.rerun()
-                        except Exception as e:
-                            st.error(f"❌ Error al guardar: {e}")
-                            conn.rollback()
-                    else:
-                        st.warning("Completa ambos campos.")
-        with col_der:
-              st.subheader("📋 Sinónimos Registrados")
-              try:
-                  df_sinonimos = pd.read_sql(
-                      "SELECT * FROM sinonimos_productos ORDER BY termino ASC, sinonimo ASC", 
-                      conn
-                  )
-                  
-                  if not df_sinonimos.empty:
-                      for i, row in df_sinonimos.iterrows():
-                          c1, c2, c3 = st.columns([2, 2, 1])
-                          c1.write(f"🗣️ **Dice:** {row['termino']}")
-                          c2.write(f"💾 **Busca:** {row['sinonimo']}")
-                          if c3.button("🗑️ Borrar", key=f"del_sin_{row['id']}"):
-                              cur.execute("DELETE FROM sinonimos_productos WHERE id = %s", (row['id'],))
-                              conn.commit()
-                              st.rerun()
-                  else:
-                      st.info("No hay sinónimos registrados aún.")
-              except Exception as e:
-                  st.error(f"Error al cargar la tabla: {e}")         
-        conn.close()
+                        else:
+                            st.warning("Completa ambos campos.")
+
+            with col_der:
+                st.subheader("📋 Sinónimos Registrados")
+                df_sinonimos = pd.read_sql("SELECT * FROM sinonimos_productos ORDER BY termino ASC", conn)
+                
+                if not df_sinonimos.empty:
+                    for i, row in df_sinonimos.iterrows():
+                        c1, c2, c3 = st.columns([2, 2, 1])
+                        c1.write(f"🗣️ **Dice:** {row['termino']}")
+                        c2.write(f"💾 **Busca:** {row['sinonimo']}")
+                        if c3.button("🗑️ Borrar", key=f"del_sin_{row['id']}"):
+                            cur.execute("DELETE FROM sinonimos_productos WHERE id = %s", (row['id'],))
+                            conn.commit()
+                            st.rerun()
+                else:
+                    st.info("No hay sinónimos registrados aún.")
+            
+            conn.close()
+        except Exception as e:
+            st.error(f"❌ Error al conectar: {e}")
     # ==========================================
-    # PESTAÑA 7: CONFIGURACIÓN DEL AGENTE Y NEGOCIO
+    # PESTAÑA 9: CONFIGURACIÓN DEL AGENTE Y NEGOCIO
     # ==========================================
     elif menu == "⚙️ Configuración del Agente":
         st.header("⚙️ Configuración del Sistema y Negocio")
