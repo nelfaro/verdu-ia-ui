@@ -357,16 +357,25 @@ else:
     # PESTAÑA 6: CARGA DE STOCK
     # ==========================================
     elif menu == "📤 Carga de Stock":
-        st.header("📤 Actualizar Inventario")
+    st.header("📤 Actualizar Inventario")
+    
+    try:
+        conn = get_connection()
+        # 1. Usamos to_char para que Postgres devuelva el texto limpio sin que Python lo altere.
+        # 2. Usamos ORDER BY id DESC para garantizar que SIEMPRE traiga el último archivo subido, sin importar la hora.
+        query_ultimo = """
+            SELECT nombre_archivo, to_char(fecha_proceso, 'DD/MM/YYYY HH24:MI') as fecha_formateada 
+            FROM control_cargas 
+            ORDER BY id DESC 
+            LIMIT 1
+        """
+        ultimo = pd.read_sql(query_ultimo, conn)
         
-        try:
-            conn = get_connection()
-            ultimo = pd.read_sql("SELECT nombre_archivo, fecha_proceso AT TIME ZONE 'UTC' AT TIME ZONE 'America/Argentina/Buenos_Aires' as fecha FROM control_cargas ORDER BY fecha_proceso DESC LIMIT 1", conn)
-            if not ultimo.empty:
-                st.info(f"Último archivo procesado: **{ultimo.iloc[0,0]}** (el {ultimo.iloc[0,1].strftime('%d/%m/%Y %H:%M')})")
-            conn.close()
-        except:
-            st.warning("No se pudo cargar el historial de archivos.")
+        if not ultimo.empty:
+            st.success(f"✅ Último archivo cargado: **{ultimo['nombre_archivo'].iloc[0]}** \n\n(Procesado en base de datos el: {ultimo['fecha_formateada'].iloc[0]} hs)")
+        conn.close()
+        except Exception as e:
+        st.warning(f"No se pudo cargar el historial de archivos. Detalle: {e}")
 
         archivo = st.file_uploader("Sube el CSV del día", type=["csv"])
         
